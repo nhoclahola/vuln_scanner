@@ -114,8 +114,7 @@ from tools.vuln_tools import (
     scan_sqli,
     scan_open_redirect,
     scan_csrf,
-    scan_path_traversal,
-    search_payloads
+    scan_path_traversal
 )
 
 from tools.security_tools import (
@@ -236,7 +235,7 @@ def scan_website(target_url=None, use_deepseek=True, scan_type="basic"):
         crawler_tools = [web_crawler, javascript_analyzer]
         scanner_tools = [scan_xss, scan_sqli, scan_open_redirect, scan_csrf, scan_path_traversal]
         info_gatherer_tools = [http_header_fetcher, ssl_tls_analyzer, cms_detector, port_scanner, security_headers_analyzer]
-        security_analyst_tools = [search_payloads, analyze_vulnerability_severity, owasp_risk_score]
+        security_analyst_tools = [analyze_vulnerability_severity, owasp_risk_score]
         
         # Initialize agents with memory_config
         crawler_agent = create_crawler_agent(
