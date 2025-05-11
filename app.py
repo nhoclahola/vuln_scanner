@@ -334,9 +334,9 @@ def scan_website(scan_id, target_url=None, use_deepseek=True, scan_type="basic",
     Args:
         scan_id (str): Unique ID for this scan
         target_url (str): Target website URL
-        use_deepseek (bool): Whether to use DeepSeek LLM
+        use_deepseek (bool): Luôn là True do chỉ sử dụng DeepSeek
         scan_type (str): Scan type - "basic" or "full"
-        selected_vulnerabilities (list): List of vulnerabilities to scan for, if None will scan all based on scan_type
+        selected_vulnerabilities (list): Deprecated, kept for compatibility
         
     Returns:
         dict: Scan results for storing in database
@@ -394,53 +394,31 @@ def scan_website(scan_id, target_url=None, use_deepseek=True, scan_type="basic",
     
     # Initialize LLM
     try:
-        if use_deepseek:
-            # Set environment variables for DeepSeek
-            deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
-            deepseek_api_base = os.getenv("DEEPSEEK_API_BASE")
-            
-            if not deepseek_api_key or not deepseek_api_base:
-                update_scan_status(5, "Configuration", "Missing DeepSeek API key or API base. Switching to OpenAI.")
-                use_deepseek = False
-            else:
-                # Set global environment variables for litellm to use
-                os.environ["OPENAI_API_KEY"] = deepseek_api_key
-                os.environ["OPENAI_API_BASE"] = deepseek_api_base
-                
-                # Use LLM integrated in CrewAI with optimized context window settings
-                llm = LLM(
-                    model="deepseek-chat",  # Model name is required parameter
-                    provider="openai",  # Use OpenAI API
-                    api_key=deepseek_api_key,
-                    api_base=deepseek_api_base,
-                    temperature=0.7,
-                    context_window=128000,  # Explicitly set DeepSeek's full context window 
-                    max_tokens=4096  # Response token limit
-                )
-                update_scan_status(10, "Configuration", "Using DeepSeek API with 128K context window")
+        # Luôn sử dụng DeepSeek - không cần kiểm tra use_deepseek nữa
+        # Set environment variables for DeepSeek
+        deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
+        deepseek_api_base = os.getenv("DEEPSEEK_API_BASE")
         
-        if not use_deepseek:
-            # Use OpenAI
-            openai_api_key = os.getenv("OPENAI_API_KEY")
-            
-            if not openai_api_key:
-                error_message = "Missing OpenAI API key. Please check your .env file"
-                update_scan_status(5, "Error", error_message)
-                return {"error": error_message}
-            
-            # Set global environment variable
-            os.environ["OPENAI_API_KEY"] = openai_api_key
-            
-            # Use LLM integrated in CrewAI with OpenAI
-            llm = LLM(
-                model="gpt-3.5-turbo",
-                provider="openai",
-                api_key=openai_api_key,
-                temperature=0.7,
-                context_window=16000,  # GPT-3.5 has 16K context window
-                max_tokens=4096
-            )
-            update_scan_status(10, "Configuration", "Using OpenAI API with 16K context window")
+        if not deepseek_api_key or not deepseek_api_base:
+            error_message = "Missing DeepSeek API key or API base. Please check your .env file"
+            update_scan_status(5, "Error", error_message)
+            return {"error": error_message}
+        
+        # Set global environment variables for litellm to use
+        os.environ["OPENAI_API_KEY"] = deepseek_api_key
+        os.environ["OPENAI_API_BASE"] = deepseek_api_base
+        
+        # Use LLM integrated in CrewAI with optimized context window settings
+        llm = LLM(
+            model="deepseek-chat",  # Model name is required parameter
+            provider="openai",  # Use OpenAI API
+            api_key=deepseek_api_key,
+            api_base=deepseek_api_base,
+            temperature=0.7,
+            context_window=128000,  # Explicitly set DeepSeek's full context window 
+            max_tokens=4096  # Response token limit
+        )
+        update_scan_status(10, "Configuration", "Using DeepSeek API with 128K context window")
     except Exception as e:
         error_message = f"Error initializing LLM: {str(e)}"
         update_scan_status(5, "Error", error_message)
@@ -452,31 +430,20 @@ def scan_website(scan_id, target_url=None, use_deepseek=True, scan_type="basic",
         
         # Initialize tools for each agent type
         crawler_tools = [web_crawler, javascript_analyzer]
-        scanner_tools = []
         
-        # Configure scanner tools based on selected vulnerabilities
-        if selected_vulnerabilities:
-            if "xss" in selected_vulnerabilities:
-                scanner_tools.append(scan_xss)
-            if "sqli" in selected_vulnerabilities:
-                scanner_tools.append(scan_sqli)
-            if "open_redirect" in selected_vulnerabilities:
-                scanner_tools.append(scan_open_redirect)
-            if "csrf" in selected_vulnerabilities:
-                scanner_tools.append(scan_csrf)
-            if "path_traversal" in selected_vulnerabilities:
-                scanner_tools.append(scan_path_traversal)
-        else:
-            # Default tools based on scan type
+        # Configure scanner tools based on scan type
+        if scan_type == "basic":
             scanner_tools = [scan_xss, scan_sqli]
-            if scan_type == "full":
-                scanner_tools.extend([scan_open_redirect, scan_csrf, scan_path_traversal])
+            update_scan_status(15, "Configuration", "Performing basic scan (XSS and SQL Injection)")
+        else:  # full scan
+            scanner_tools = [scan_xss, scan_sqli, scan_open_redirect, scan_csrf, scan_path_traversal]
+            update_scan_status(15, "Configuration", "Performing full scan (all vulnerabilities)")
         
         info_gatherer_tools = [http_header_fetcher, ssl_tls_analyzer, cms_detector, port_scanner, security_headers_analyzer]
         security_analyst_tools = [analyze_vulnerability_severity, owasp_risk_score]
         
         # Initialize agents with memory_config
-        update_scan_status(15, "Initializing agents", "Creating specialized agents for scanning", "setup")
+        update_scan_status(20, "Initializing agents", "Creating specialized agents for scanning", "setup")
         
         crawler_agent = create_crawler_agent(
             tools=crawler_tools, 
@@ -747,16 +714,13 @@ def scan_website(scan_id, target_url=None, use_deepseek=True, scan_type="basic",
             process=Process.sequential,
             verbose=True,
             memory=False,  # Disable built-in memory system to avoid embedding errors
-            context_strategy="full_context" if use_deepseek else "recursive_summarize",  # Use full context for DeepSeek
-            max_step_tokens=100000 if use_deepseek else 25000,  # 100K tokens for DeepSeek, 25K for others
+            context_strategy="full_context",  # Use full context for DeepSeek
+            max_step_tokens=100000,  # 100K tokens for DeepSeek
             cache=True  # Ensure cache is enabled to save intermediate results
         )
         
-        # Before running the crew, log configuration details
-        if use_deepseek:
-            update_scan_status(40, "Optimization", "Using DeepSeek with 100K max step tokens and full context strategy", "setup")
-        else:
-            update_scan_status(40, "Optimization", "Using OpenAI with 25K max step tokens and recursive summarize strategy", "setup")
+        # Log optimization settings
+        update_scan_status(40, "Optimization", "Using DeepSeek with 100K max step tokens and full context strategy", "setup")
         
         # Update status to running
         update_scan_status(45, "Starting scan", "Beginning vulnerability assessment...", "setup")
@@ -871,28 +835,11 @@ def start_scan():
     
     # Get scan type
     scan_type = request.form.get('scan_type', 'basic')
+    if scan_type not in ['basic', 'full']:
+        scan_type = 'basic'  # Default to basic scan if invalid type
     
-    # Get selected vulnerabilities
-    vulnerabilities = []
-    for vuln in ['xss', 'sqli', 'open_redirect', 'path_traversal', 'csrf']:
-        if vuln in request.form:
-            vulnerabilities.append(vuln)
-    
-    if not vulnerabilities:
-        flash('Please select at least one vulnerability to scan.', 'error')
-        return redirect(url_for('index'))
-    
-    # Check LLM preference
-    use_deepseek = False
-    if "use_deepseek" in request.form:
-        use_deepseek = True
-    elif "use_openai" in request.form:
-        use_deepseek = False
-    else:
-        # Use DeepSeek if the API key is available, otherwise use OpenAI
-        deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
-        if deepseek_api_key:
-            use_deepseek = True
+    # Luôn sử dụng DeepSeek vì chỉ có API key của DeepSeek
+    use_deepseek = True
     
     # Save initial scan details
     scan_data = {
@@ -901,7 +848,6 @@ def start_scan():
         'start_time': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         'status': 'initializing',
         'scan_type': scan_type,
-        'vulnerabilities': vulnerabilities,
         'use_deepseek': use_deepseek,
         'progress': 0,
         'logs': []
@@ -911,13 +857,13 @@ def start_scan():
         json.dump(scan_data, f, indent=4)
     
     # Start scan in background thread
-    thread = threading.Thread(target=run_background_scan, args=(scan_id, url, vulnerabilities, use_deepseek, scan_type))
+    thread = threading.Thread(target=run_background_scan, args=(scan_id, url, use_deepseek, scan_type))
     thread.daemon = True
     thread.start()
     
     return redirect(url_for('scan_status', scan_id=scan_id))
 
-def run_background_scan(scan_id, url, vulnerabilities, use_deepseek, scan_type):
+def run_background_scan(scan_id, url, use_deepseek, scan_type):
     """Run scan in background thread."""
     try:
         # Update scan status to running
@@ -930,7 +876,7 @@ def run_background_scan(scan_id, url, vulnerabilities, use_deepseek, scan_type):
             json.dump(scan_data, f, indent=4)
         
         # Run the scan
-        result = scan_website(scan_id, url, use_deepseek, scan_type, vulnerabilities)
+        result = scan_website(scan_id, url, use_deepseek, scan_type)
         
         # Update scan data with results
         with open(os.path.join(app.config['SCAN_RESULTS_DIR'], f"{scan_id}.json"), 'r') as f:
@@ -978,12 +924,30 @@ def scan_status(scan_id):
     
     # Thêm kết quả quét cho trang status
     results = {}
-    # Với mỗi loại lỗ hổng đã chọn, tạo dữ liệu kết quả tạm thời
-    for vuln_type in data.get("vulnerabilities", []):
-        results[vuln_type] = {
+    scan_type = data.get("scan_type", "basic")
+    
+    if scan_type == "basic":
+        # Thông tin về các lỗ hổng được quét trong chế độ basic
+        vulnerabilities_checked = {
+            "xss": "Cross-Site Scripting (XSS)",
+            "sqli": "SQL Injection"
+        }
+    else:  # full scan
+        # Thông tin về các lỗ hổng được quét trong chế độ full
+        vulnerabilities_checked = {
+            "xss": "Cross-Site Scripting (XSS)",
+            "sqli": "SQL Injection",
+            "open_redirect": "Open Redirect",
+            "csrf": "Cross-Site Request Forgery (CSRF)",
+            "path_traversal": "Path Traversal"
+        }
+    
+    # Tạo kết quả quét tạm thời cho mỗi loại lỗ hổng
+    for vuln_key, vuln_name in vulnerabilities_checked.items():
+        results[vuln_key] = {
+            "name": vuln_name,
             "status": "Completed" if data.get("status") == "completed" else "Scanning",
-            "vulnerable": False,  # Giá trị mặc định
-            "payloads": []
+            "vulnerable": False  # Giá trị mặc định
         }
     
     # Nếu quét đã hoàn thành và có báo cáo, phân tích báo cáo để tìm thông tin về lỗ hổng
@@ -997,53 +961,29 @@ def scan_status(scan_id):
         # Kiểm tra XSS
         if "xss" in results and ("XSS" in report or "Cross-Site Scripting" in report):
             results["xss"]["vulnerable"] = True
-            results["xss"]["payloads"] = ["<script>alert('XSS')</script>"]
-            overall_risk = "High"
-        
+            
         # Kiểm tra SQL Injection
         if "sqli" in results and ("SQL Injection" in report or "SQLi" in report):
             results["sqli"]["vulnerable"] = True
-            results["sqli"]["payloads"] = ["' OR 1=1 --"]
-            overall_risk = "High"
-        
+            
         # Kiểm tra Open Redirect
         if "open_redirect" in results and "Open Redirect" in report:
             results["open_redirect"]["vulnerable"] = True
-            results["open_redirect"]["payloads"] = ["http://evil.com"]
-            overall_risk = "Medium"
-        
-        # Kiểm tra Path Traversal
-        if "path_traversal" in results and "Path Traversal" in report:
-            results["path_traversal"]["vulnerable"] = True
-            results["path_traversal"]["payloads"] = ["../../../etc/passwd"]
-            overall_risk = "High"
-        
+            
         # Kiểm tra CSRF
-        if "csrf" in results and "CSRF" in report:
+        if "csrf" in results and ("CSRF" in report or "Cross-Site Request Forgery" in report):
             results["csrf"]["vulnerable"] = True
-            results["csrf"]["payloads"] = ["<form action='transfer.php'>"]
-            overall_risk = "Medium"
-    else:
-        # Nếu quét chưa hoàn thành, không có thông tin về mức độ rủi ro
-        overall_risk = None
+            
+        # Kiểm tra Path Traversal
+        if "path_traversal" in results and ("Path Traversal" in report or "Directory Traversal" in report):
+            results["path_traversal"]["vulnerable"] = True
     
-    return render_template(
-        'status.html',
-        scan_id=scan_id,
-        url=data.get("url"),
-        start_time=data.get("start_time"),
-        end_time=data.get("end_time", ""),
-        status=data.get("status"),
-        vulnerabilities=data.get("vulnerabilities", []),
-        scan_type=data.get("scan_type", "basic"),
-        use_deepseek=data.get("use_deepseek", False),
-        error=data.get("error", ""),
-        progress=data.get("progress", 0),
-        logs=data.get("logs", []),
-        agent_status=data.get("agent_status", {}),
-        results=results,  # Thêm biến results vào context
-        overall_risk=overall_risk  # Thêm mức độ rủi ro tổng thể
-    )
+    return render_template('status.html', 
+                          scan_id=scan_id, 
+                          data=data, 
+                          results=results,
+                          scan_type=scan_type,
+                          vulnerabilities_checked=vulnerabilities_checked)
 
 @app.route('/api/scan_status/<scan_id>')
 def api_scan_status(scan_id):
@@ -1258,30 +1198,13 @@ def api_scan():
     if scan_type not in ['basic', 'full']:
         return jsonify({'error': 'Invalid scan type. Must be "basic" or "full"'}), 400
     
-    # Get selected vulnerabilities
-    vulnerabilities = data.get('vulnerabilities', [])
-    if not vulnerabilities:
-        # Default vulnerabilities based on scan type
-        vulnerabilities = ['xss', 'sqli']
-        if scan_type == 'full':
-            vulnerabilities.extend(['open_redirect', 'path_traversal', 'csrf'])
-    
-    # Validate vulnerabilities
-    valid_vulns = ['xss', 'sqli', 'open_redirect', 'path_traversal', 'csrf']
-    for vuln in vulnerabilities:
-        if vuln not in valid_vulns:
-            return jsonify({'error': f'Invalid vulnerability type: {vuln}'}), 400
-    
-    # Check LLM preference
-    use_deepseek = data.get('use_deepseek', False)
+    # Luôn sử dụng DeepSeek
+    use_deepseek = True
     
     # Get API key if provided
     api_key = data.get('api_key')
     if api_key:
-        if use_deepseek:
-            os.environ['DEEPSEEK_API_KEY'] = api_key
-        else:
-            os.environ['OPENAI_API_KEY'] = api_key
+        os.environ['DEEPSEEK_API_KEY'] = api_key
     
     # Save initial scan details
     scan_data = {
@@ -1290,7 +1213,6 @@ def api_scan():
         'start_time': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         'status': 'initializing',
         'scan_type': scan_type,
-        'vulnerabilities': vulnerabilities,
         'use_deepseek': use_deepseek,
         'progress': 0,
         'logs': []
@@ -1300,7 +1222,7 @@ def api_scan():
         json.dump(scan_data, f, indent=4)
     
     # Start scan in background thread
-    thread = threading.Thread(target=run_background_scan, args=(scan_id, url, vulnerabilities, use_deepseek, scan_type))
+    thread = threading.Thread(target=run_background_scan, args=(scan_id, url, use_deepseek, scan_type))
     thread.daemon = True
     thread.start()
     

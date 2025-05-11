@@ -1,0 +1,8 @@
+{
+  "status": "error",
+  "progress": 15,
+  "start_time": "2025-05-11 09:07:07",
+  "agent_status": {},
+  "error": "1 validation error for Agent\ntools\n  Input should be a valid list [type=list_type, input_value=<crewai.llm.LLM object at 0x000002BDF4E713D0>, input_type=LLM]\n    For further information visit https://errors.pydantic.dev/2.11/v/list_type",
+  "end_time": "2025-05-11 09:07:07"
+}

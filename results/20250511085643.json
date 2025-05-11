@@ -1,0 +1,16 @@
+{
+    "id": "20250511085643",
+    "url": "http://testphp.vulnweb.com/",
+    "start_time": "2025-05-11 08:56:43",
+    "status": "error",
+    "scan_type": "basic",
+    "vulnerabilities": [
+        "xss",
+        "sqli"
+    ],
+    "use_deepseek": true,
+    "progress": 100,
+    "logs": [],
+    "error": "Scan failed with an error",
+    "end_time": "2025-05-11 08:56:43"
+}
