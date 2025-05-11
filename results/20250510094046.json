@@ -1,0 +1,21 @@
+{
+    "id": "20250510094046",
+    "url": "http://testphp.vulnweb.com/",
+    "start_time": "2025-05-10 09:40:46",
+    "status": "error",
+    "vulnerabilities": [
+        "xss",
+        "sqli"
+    ],
+    "progress": 0,
+    "results": {},
+    "error": "unindent does not match any outer indentation level (vuln_tools.py, line 67)",
+    "end_time": "2025-05-10 09:40:47",
+    "recent_logs": [
+        {
+            "time": "09:40:47",
+            "message": "Error during scan: unindent does not match any outer indentation level (vuln_tools.py, line 67)",
+            "level": "error"
+        }
+    ]
+}

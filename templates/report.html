@@ -1,0 +1,348 @@
+{% extends "layout.html" %}
+
+{% block title %}Vulnerability Scan Report - {{ url }}{% endblock %}
+
+{% block head %}
+<style>
+    .report-header {
+        background: linear-gradient(135deg, #4a00e0, #8e2de2);
+        color: white;
+        border-radius: 15px;
+        padding: 2rem;
+        margin-bottom: 2rem;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+    }
+    .report-section {
+        background: white;
+        border-radius: 10px;
+        padding: 1.5rem;
+        margin-bottom: 2rem;
+        box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
+    }
+    .section-title {
+        border-bottom: 2px solid #f0f0f0;
+        padding-bottom: 1rem;
+        margin-bottom: 1.5rem;
+        color: #4a00e0;
+    }
+    .risk-badge {
+        font-size: 0.9rem;
+        padding: 0.5rem 0.75rem;
+        border-radius: 50rem;
+        font-weight: 600;
+        margin-right: 0.5rem;
+    }
+    .risk-critical {
+        background-color: #d32f2f;
+        color: white;
+    }
+    .risk-high {
+        background-color: #f44336;
+        color: white;
+    }
+    .risk-medium {
+        background-color: #ff9800;
+        color: white;
+    }
+    .risk-low {
+        background-color: #4caf50;
+        color: white;
+    }
+    .risk-info {
+        background-color: #2196f3;
+        color: white;
+    }
+    .risk-none {
+        background-color: #9e9e9e;
+        color: white;
+    }
+    .vulnerability-item {
+        border-left: 4px solid;
+        padding-left: 1.5rem;
+        margin-bottom: 1.5rem;
+        background: #f9f9f9;
+        border-radius: 0 8px 8px 0;
+        padding: 1.5rem 1.5rem 1.5rem 2rem;
+    }
+    .vulnerability-item.critical {
+        border-left-color: #d32f2f;
+    }
+    .vulnerability-item.high {
+        border-left-color: #f44336;
+    }
+    .vulnerability-item.medium {
+        border-left-color: #ff9800;
+    }
+    .vulnerability-item.low {
+        border-left-color: #4caf50;
+    }
+    .vulnerability-details {
+        display: none;
+        padding-top: 1rem;
+    }
+    .toggle-details {
+        cursor: pointer;
+        color: #4a00e0;
+    }
+    .code-block {
+        background: #1e1e1e;
+        color: #f8f8f8;
+        border-radius: 5px;
+        padding: 1rem;
+        font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+        overflow-x: auto;
+    }
+    .nav-pills .nav-link.active {
+        background-color: #4a00e0;
+    }
+    .nav-pills .nav-link {
+        color: #4a00e0;
+    }
+    .nav-pills .nav-link:hover {
+        background-color: rgba(74, 0, 224, 0.1);
+    }
+    .summary-box {
+        border-radius: 10px;
+        padding: 1.5rem;
+        margin-bottom: 1rem;
+        color: white;
+    }
+    .summary-box.high {
+        background: linear-gradient(135deg, #f44336, #d32f2f);
+    }
+    .summary-box.medium {
+        background: linear-gradient(135deg, #ff9800, #f57c00);
+    }
+    .summary-box.low {
+        background: linear-gradient(135deg, #4caf50, #388e3c);
+    }
+    .summary-box.none {
+        background: linear-gradient(135deg, #9e9e9e, #616161);
+    }
+    .summary-count {
+        font-size: 3rem;
+        font-weight: bold;
+        line-height: 1;
+    }
+    /* Markdown Formatting */
+    .markdown-content {
+        padding: 1rem;
+        line-height: 1.6;
+    }
+    .markdown-content h1 {
+        margin-top: 1rem;
+        margin-bottom: 1rem;
+        font-size: 2rem;
+    }
+    .markdown-content h2 {
+        margin-top: 1.5rem;
+        margin-bottom: 1rem;
+        font-size: 1.75rem;
+    }
+    .markdown-content h3 {
+        margin-top: 1.2rem;
+        margin-bottom: 0.8rem;
+        font-size: 1.4rem;
+    }
+    .markdown-content h4 {
+        margin-top: 1rem;
+        margin-bottom: 0.6rem;
+        font-size: 1.25rem;
+    }
+    .markdown-content ul, .markdown-content ol {
+        margin-left: 1.5rem;
+        margin-bottom: 1rem;
+    }
+    .markdown-content code {
+        background: #f0f0f0;
+        padding: 0.1rem 0.3rem;
+        border-radius: 3px;
+        font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    }
+    .markdown-content pre {
+        background: #f0f0f0;
+        padding: 1rem;
+        border-radius: 5px;
+        overflow-x: auto;
+        margin-bottom: 1rem;
+    }
+    .markdown-content pre code {
+        background: transparent;
+        padding: 0;
+    }
+    .markdown-content blockquote {
+        border-left: 4px solid #e0e0e0;
+        padding-left: 1rem;
+        margin-left: 0;
+        color: #555;
+    }
+    .markdown-content table {
+        border-collapse: collapse;
+        width: 100%;
+        margin-bottom: 1rem;
+    }
+    .markdown-content table, .markdown-content th, .markdown-content td {
+        border: 1px solid #e0e0e0;
+    }
+    .markdown-content th, .markdown-content td {
+        padding: 0.5rem;
+        text-align: left;
+    }
+    .markdown-content th {
+        background-color: #f0f0f0;
+    }
+</style>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/default.min.css">
+<script src="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/lib/highlight.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="mb-3">
+    <a href="{{ url_for('scan_status', scan_id=scan_id) }}" class="btn btn-outline-primary">
+        <i class="fas fa-arrow-left me-2"></i>Back to Scan Status
+    </a>
+</div>
+
+<div class="report-header">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1><i class="fas fa-file-alt me-2"></i>Vulnerability Scan Report</h1>
+        <div>
+            <a href="{{ url_for('download_report', scan_id=scan_id, format='json') }}" class="btn btn-light">
+                <i class="fas fa-download me-2"></i>Download Report (JSON)
+            </a>
+            <a href="{{ url_for('download_report', scan_id=scan_id, format='txt') }}" class="btn btn-light ms-2">
+                <i class="fas fa-file-alt me-2"></i>Download Report (TXT)
+            </a>
+        </div>
+    </div>
+    <p class="lead mb-0">URL: <a href="{{ url }}" target="_blank" class="text-white">{{ url }}</a></p>
+    <p>Scan Time: {{ start_time }} - {{ end_time }}</p>
+    
+    <div class="d-flex flex-wrap mt-3">
+        {% for vuln in vulnerabilities %}
+        {% if vuln == "xss" %}
+        <span class="badge bg-danger vulnerability-badge me-2">XSS</span>
+        {% elif vuln == "sqli" %}
+        <span class="badge bg-warning text-dark vulnerability-badge me-2">SQL Injection</span>
+        {% elif vuln == "open_redirect" %}
+        <span class="badge bg-primary vulnerability-badge me-2">Open Redirect</span>
+        {% elif vuln == "path_traversal" %}
+        <span class="badge bg-info text-dark vulnerability-badge me-2">Path Traversal</span>
+        {% elif vuln == "csrf" %}
+        <span class="badge bg-success vulnerability-badge me-2">CSRF</span>
+        {% endif %}
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Summary -->
+<div class="report-section">
+    <h2 class="section-title">Result Summary</h2>
+    
+    <div class="mb-4">
+        <h3>Overall Risk Level:
+            {% if overall_risk == "Critical" %}
+            <span class="risk-badge risk-critical">Critical</span>
+            {% elif overall_risk == "High" %}
+            <span class="risk-badge risk-high">High</span>
+            {% elif overall_risk == "Medium" %}
+            <span class="risk-badge risk-medium">Medium</span>
+            {% elif overall_risk == "Low" %}
+            <span class="risk-badge risk-low">Low</span>
+            {% else %}
+            <span class="risk-badge risk-none">None</span>
+            {% endif %}
+        </h3>
+    </div>
+    
+    <div class="row mb-4">
+        <!-- Count vulnerable categories -->
+        {% set high_vuln_count = [('sqli' in results and results.sqli.vulnerable), ('path_traversal' in results and results.path_traversal.vulnerable)]|select|list|length %}
+        {% set medium_vuln_count = [('xss' in results and results.xss.vulnerable), ('csrf' in results and results.csrf.vulnerable)]|select|list|length %}
+        {% set low_vuln_count = [('open_redirect' in results and results.open_redirect.vulnerable)]|select|list|length %}
+        
+        {% if high_vuln_count > 0 %}
+        <div class="col-md-4">
+            <div class="summary-box high">
+                <h4>High Risk</h4>
+                <div class="summary-count mb-2">{{ high_vuln_count }}</div>
+                <p class="mb-0">High severity vulnerabilities detected</p>
+            </div>
+        </div>
+        {% endif %}
+        
+        {% if medium_vuln_count > 0 %}
+        <div class="col-md-4">
+            <div class="summary-box medium">
+                <h4>Medium Risk</h4>
+                <div class="summary-count mb-2">{{ medium_vuln_count }}</div>
+                <p class="mb-0">Medium severity vulnerabilities detected</p>
+            </div>
+        </div>
+        {% endif %}
+        
+        {% if low_vuln_count > 0 %}
+        <div class="col-md-4">
+            <div class="summary-box low">
+                <h4>Low Risk</h4>
+                <div class="summary-count mb-2">{{ low_vuln_count }}</div>
+                <p class="mb-0">Low severity vulnerabilities detected</p>
+            </div>
+        </div>
+        {% endif %}
+        
+        {% if high_vuln_count == 0 and medium_vuln_count == 0 and low_vuln_count == 0 %}
+        <div class="col-md-12">
+            <div class="summary-box none">
+                <h4>No Vulnerabilities</h4>
+                <div class="summary-count mb-2">0</div>
+                <p class="mb-0">No significant security vulnerabilities detected</p>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Security Analyst Report -->
+<div class="report-section">
+    <h2 class="section-title">Security Analysis Report</h2>
+    
+    <div id="markdown-report" class="markdown-content">
+        <!-- This will be filled by JavaScript below -->
+    </div>
+    
+    <!-- Raw report content (hidden) -->
+    <div id="raw-report-content" style="display: none;">{{ raw_report }}</div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Parse and render the markdown content
+        const rawReportContent = document.getElementById('raw-report-content').textContent;
+        const markdownContent = document.getElementById('markdown-report');
+        
+        // Configure marked options
+        marked.setOptions({
+            breaks: true,
+            gfm: true,
+            headerIds: true,
+            highlight: function(code, lang) {
+                const language = hljs.getLanguage(lang) ? lang : 'plaintext';
+                return hljs.highlight(code, { language }).value;
+            }
+        });
+        
+        // Render the markdown to HTML
+        markdownContent.innerHTML = marked.parse(rawReportContent);
+        
+        // Highlight code blocks
+        document.querySelectorAll('pre code').forEach((block) => {
+            hljs.highlightBlock(block);
+        });
+    });
+</script>
+{% endblock %} 

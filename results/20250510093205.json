@@ -1,0 +1,48 @@
+{
+    "id": "20250510093205",
+    "url": "http://testphp.vulnweb.com/",
+    "start_time": "2025-05-10 09:32:05",
+    "status": "completed",
+    "vulnerabilities": [
+        "xss",
+        "sqli"
+    ],
+    "progress": 100,
+    "results": {
+        "xss": {
+            "vulnerable": true,
+            "payloads": [
+                "<script>alert('XSS')</script>",
+                "alert(1)"
+            ]
+        },
+        "sqli": {
+            "vulnerable": true,
+            "payloads": [
+                "' OR 1=1 --",
+                "' UNION SELECT * FROM users --"
+            ]
+        }
+    },
+    "recent_logs": [
+        {
+            "time": "09:32:07",
+            "message": "Scanning for xss vulnerability...",
+            "level": "info"
+        },
+        {
+            "time": "09:32:09",
+            "message": "Scanning for sqli vulnerability...",
+            "level": "info"
+        },
+        {
+            "time": "09:32:09",
+            "message": "Scan completed successfully!",
+            "level": "success"
+        }
+    ],
+    "agent_status": {
+        "scanner": "Scanning for sqli vulnerabilities"
+    },
+    "end_time": "2025-05-10 09:32:09"
+}

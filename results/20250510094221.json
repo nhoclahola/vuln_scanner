@@ -1,0 +1,127 @@
+{
+    "id": "20250510094221",
+    "url": "http://testphp.vulnweb.com/",
+    "start_time": "2025-05-10 09:42:21",
+    "status": "completed",
+    "vulnerabilities": [
+        "xss",
+        "sqli"
+    ],
+    "progress": 100,
+    "results": {
+        "xss": {
+            "vulnerable": false,
+            "endpoints": [],
+            "payloads": []
+        },
+        "sqli": {
+            "vulnerable": false,
+            "endpoints": [],
+            "payloads": []
+        }
+    },
+    "recent_logs": [
+        {
+            "time": "09:42:37",
+            "message": "Starting vulnerability scan for http://testphp.vulnweb.com/",
+            "level": "info"
+        },
+        {
+            "time": "09:42:37",
+            "message": "Crawler Agent is analyzing the website structure...",
+            "level": "info"
+        },
+        {
+            "time": "09:42:38",
+            "message": "Crawler Agent found 2 endpoints to scan",
+            "level": "info"
+        },
+        {
+            "time": "09:42:38",
+            "message": "Info Gatherer Agent is analyzing server configuration...",
+            "level": "info"
+        },
+        {
+            "time": "09:42:38",
+            "message": "Info Gatherer Agent completed server analysis",
+            "level": "info"
+        },
+        {
+            "time": "09:42:38",
+            "message": "Scanner Agent is now checking for vulnerabilities...",
+            "level": "info"
+        },
+        {
+            "time": "09:42:38",
+            "message": "Scanner Agent is checking for Cross-Site Scripting vulnerabilities...",
+            "level": "info"
+        },
+        {
+            "time": "09:42:38",
+            "message": "Scanner Agent is checking for SQL Injection vulnerabilities...",
+            "level": "info"
+        },
+        {
+            "time": "09:42:38",
+            "message": "Security Analyst Agent is evaluating the scan findings...",
+            "level": "info"
+        },
+        {
+            "time": "09:42:38",
+            "message": "Security Analyst Agent has completed the vulnerability assessment.",
+            "level": "success"
+        }
+    ],
+    "agent_status": {
+        "crawler": "Discovered 2 endpoints",
+        "info_gatherer": "Server information gathered",
+        "scanner": "Scanning for SQL Injection vulnerabilities",
+        "security_analyst": "Scan completed"
+    },
+    "overall_risk": "None",
+    "crew_summary": "The security analysis did not detect any vulnerabilities in the target system during this scan. However, this does not guarantee that the system is completely secure. Regular security testing is recommended as new vulnerabilities may emerge over time.",
+    "server_info": {
+        "headers": {
+            "Server": "nginx/1.19.0",
+            "Date": "Sat, 10 May 2025 02:42:39 GMT",
+            "Content-Type": "text/html; charset=UTF-8",
+            "Transfer-Encoding": "chunked",
+            "Connection": "keep-alive",
+            "X-Powered-By": "PHP/5.6.40-38+ubuntu20.04.1+deb.sury.org+1",
+            "Content-Encoding": "gzip"
+        },
+        "security_headers": {
+            "Strict-Transport-Security": {
+                "status": "missing",
+                "message": "Missing HSTS header"
+            },
+            "Content-Security-Policy": {
+                "status": "missing",
+                "message": "Missing CSP header"
+            },
+            "X-XSS-Protection": {
+                "status": "missing",
+                "message": "Missing XSS Protection header"
+            },
+            "X-Content-Type-Options": {
+                "status": "missing",
+                "message": "Missing Content Type Options header"
+            },
+            "X-Frame-Options": {
+                "status": "missing",
+                "message": "Missing Frame Options header"
+            },
+            "Referrer-Policy": {
+                "status": "missing",
+                "message": "Missing Referrer Policy"
+            }
+        },
+        "status_code": 200,
+        "server": "nginx/1.19.0"
+    },
+    "discovered_endpoints": [
+        "http://testphp.vulnweb.com/",
+        "http://testphp.vulnweb.com/hpp/"
+    ],
+    "end_time": "2025-05-10 09:42:38"
+}

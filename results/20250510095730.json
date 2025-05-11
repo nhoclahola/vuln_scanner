@@ -1,0 +1,26 @@
+{
+    "id": "20250510095730",
+    "url": "http://testphp.vulnweb.com",
+    "start_time": "2025-05-10 09:57:30",
+    "status": "error",
+    "vulnerabilities": [
+        "xss",
+        "sqli"
+    ],
+    "progress": 5,
+    "results": {},
+    "recent_logs": [
+        {
+            "time": "09:57:30",
+            "message": "Starting AI-powered vulnerability scan for http://testphp.vulnweb.com",
+            "level": "info"
+        },
+        {
+            "time": "09:57:30",
+            "message": "Error during scan: No module named 'vuln_scanner'",
+            "level": "error"
+        }
+    ],
+    "error": "No module named 'vuln_scanner'",
+    "end_time": "2025-05-10 09:57:30"
+}

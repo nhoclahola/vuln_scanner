@@ -1,0 +1,336 @@
+{% extends "layout.html" %}
+
+{% block title %}Vulnerability Scanner - Trang chủ{% endblock %}
+
+{% block head %}
+<style>
+    .hero-section {
+        background: linear-gradient(135deg, #4a00e0, #8e2de2);
+        color: white;
+        border-radius: 15px;
+        padding: 3rem;
+        margin-bottom: 2rem;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+    }
+    
+    .form-container {
+        background-color: white;
+        border-radius: 15px;
+        padding: 2rem;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+    }
+    
+    .url-input {
+        border-radius: 30px;
+        padding-left: 1.5rem;
+        height: 50px;
+    }
+    
+    .scan-btn {
+        border-radius: 30px;
+        height: 50px;
+        font-weight: bold;
+        padding: 0 2rem;
+    }
+    
+    .vulnerability-option {
+        display: flex;
+        align-items: center;
+        margin-bottom: 1rem;
+        cursor: pointer;
+        padding: 1rem;
+        border-radius: 10px;
+        transition: all 0.3s;
+    }
+    
+    .vulnerability-option:hover {
+        background-color: rgba(142, 45, 226, 0.05);
+        transform: translateY(-2px);
+    }
+    
+    .vulnerability-option input[type="checkbox"] {
+        transform: scale(1.2);
+    }
+    
+    .vulnerability-icon {
+        width: 50px;
+        height: 50px;
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 24px;
+        margin-right: 1rem;
+    }
+    
+    .xss-icon {
+        background-color: rgba(220, 53, 69, 0.1);
+        color: #dc3545;
+    }
+    
+    .sqli-icon {
+        background-color: rgba(255, 193, 7, 0.1);
+        color: #ffc107;
+    }
+    
+    .redirect-icon {
+        background-color: rgba(13, 110, 253, 0.1);
+        color: #0d6efd;
+    }
+    
+    .path-icon {
+        background-color: rgba(13, 202, 240, 0.1);
+        color: #0dcaf0;
+    }
+    
+    .csrf-icon {
+        background-color: rgba(25, 135, 84, 0.1);
+        color: #198754;
+    }
+    
+    .vulnerability-description {
+        font-size: 0.95rem;
+        color: #6c757d;
+    }
+    
+    .usage-section {
+        background-color: #f8f9fa;
+        border-radius: 15px;
+        padding: 2rem;
+        margin-top: 2rem;
+    }
+    
+    .usage-step {
+        display: flex;
+        margin-bottom: 1.5rem;
+    }
+    
+    .step-number {
+        width: 36px;
+        height: 36px;
+        background: linear-gradient(135deg, #4a00e0, #8e2de2);
+        color: white;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        margin-right: 1rem;
+        flex-shrink: 0;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Hero Section -->
+<div class="hero-section">
+    <div class="row align-items-center">
+        <div class="col-lg-7">
+            <h1 class="display-4 fw-bold mb-3">
+                <i class="fas fa-shield-alt me-3"></i>Vulnerability Scanner
+            </h1>
+            <p class="lead mb-4">Công cụ quét lỗ hổng bảo mật tích hợp AI, giúp bạn phát hiện các lỗ hổng trên website một cách nhanh chóng và chính xác.</p>
+            <p class="mb-0 d-flex align-items-center">
+                <i class="fas fa-check-circle me-2 text-light"></i>
+                <span>Quét nhanh chóng</span>
+                <span class="mx-3">•</span>
+                <i class="fas fa-check-circle me-2 text-light"></i>
+                <span>Báo cáo chi tiết</span>
+                <span class="mx-3">•</span>
+                <i class="fas fa-check-circle me-2 text-light"></i>
+                <span>Tích hợp AI</span>
+            </p>
+        </div>
+        <div class="col-lg-5 d-none d-lg-block">
+            <div class="text-center">
+                <i class="fas fa-search-shield fa-10x opacity-75"></i>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Form Container -->
+<div class="form-container">
+    <form action="{{ url_for('start_scan') }}" method="post" id="scan-form">
+        <div class="mb-4">
+            <h4 class="mb-3">Nhập URL website cần quét</h4>
+            <div class="input-group mb-3">
+                <span class="input-group-text bg-transparent border-end-0">
+                    <i class="fas fa-globe"></i>
+                </span>
+                <input type="url" class="form-control url-input border-start-0" name="url" placeholder="https://example.com" required>
+            </div>
+            <small class="text-muted">
+                <i class="fas fa-info-circle me-1"></i>
+                Nhập URL đầy đủ bao gồm cả http:// hoặc https://
+            </small>
+        </div>
+        
+        <h4 class="mb-3">Chọn các lỗ hổng cần quét</h4>
+        <div class="row">
+            <div class="col-md-6">
+                <label class="vulnerability-option" for="xss">
+                    <div class="vulnerability-icon xss-icon">
+                        <i class="fas fa-code"></i>
+                    </div>
+                    <div class="vulnerability-content flex-grow-1">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <h5 class="mb-1">Cross-Site Scripting (XSS)</h5>
+                            <input type="checkbox" class="form-check-input" id="xss" name="xss" checked>
+                        </div>
+                        <p class="vulnerability-description mb-0">
+                            Phát hiện lỗ hổng cho phép chèn mã JavaScript độc hại.
+                        </p>
+                    </div>
+                </label>
+            </div>
+            
+            <div class="col-md-6">
+                <label class="vulnerability-option" for="sqli">
+                    <div class="vulnerability-icon sqli-icon">
+                        <i class="fas fa-database"></i>
+                    </div>
+                    <div class="vulnerability-content flex-grow-1">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <h5 class="mb-1">SQL Injection</h5>
+                            <input type="checkbox" class="form-check-input" id="sqli" name="sqli" checked>
+                        </div>
+                        <p class="vulnerability-description mb-0">
+                            Phát hiện lỗ hổng cho phép thực thi câu lệnh SQL độc hại.
+                        </p>
+                    </div>
+                </label>
+            </div>
+            
+            <div class="col-md-6">
+                <label class="vulnerability-option" for="open_redirect">
+                    <div class="vulnerability-icon redirect-icon">
+                        <i class="fas fa-external-link-alt"></i>
+                    </div>
+                    <div class="vulnerability-content flex-grow-1">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <h5 class="mb-1">Open Redirect</h5>
+                            <input type="checkbox" class="form-check-input" id="open_redirect" name="open_redirect">
+                        </div>
+                        <p class="vulnerability-description mb-0">
+                            Phát hiện lỗ hổng chuyển hướng không kiểm soát.
+                        </p>
+                    </div>
+                </label>
+            </div>
+            
+            <div class="col-md-6">
+                <label class="vulnerability-option" for="path_traversal">
+                    <div class="vulnerability-icon path-icon">
+                        <i class="fas fa-folder-open"></i>
+                    </div>
+                    <div class="vulnerability-content flex-grow-1">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <h5 class="mb-1">Path Traversal</h5>
+                            <input type="checkbox" class="form-check-input" id="path_traversal" name="path_traversal">
+                        </div>
+                        <p class="vulnerability-description mb-0">
+                            Phát hiện lỗ hổng truy cập file/thư mục không được phép.
+                        </p>
+                    </div>
+                </label>
+            </div>
+            
+            <div class="col-md-6">
+                <label class="vulnerability-option" for="csrf">
+                    <div class="vulnerability-icon csrf-icon">
+                        <i class="fas fa-user-secret"></i>
+                    </div>
+                    <div class="vulnerability-content flex-grow-1">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <h5 class="mb-1">Cross-Site Request Forgery</h5>
+                            <input type="checkbox" class="form-check-input" id="csrf" name="csrf">
+                        </div>
+                        <p class="vulnerability-description mb-0">
+                            Phát hiện lỗ hổng cho phép thực thi hành động trái phép.
+                        </p>
+                    </div>
+                </label>
+            </div>
+        </div>
+        
+        <div class="d-grid gap-2 col-lg-6 mx-auto mt-4">
+            <button type="submit" class="btn btn-primary scan-btn" id="scan-button">
+                <i class="fas fa-search me-2"></i> Bắt đầu quét
+            </button>
+            <button type="button" class="btn btn-outline-secondary scan-btn" id="select-all-btn">
+                <i class="fas fa-check-double me-2"></i> Chọn tất cả các lỗ hổng
+            </button>
+        </div>
+    </form>
+</div>
+
+<!-- Usage Section -->
+<div class="usage-section">
+    <h4 class="mb-4"><i class="fas fa-info-circle me-2"></i>Hướng dẫn sử dụng</h4>
+    
+    <div class="usage-step">
+        <div class="step-number">1</div>
+        <div>
+            <h5>Nhập URL cần quét</h5>
+            <p class="text-muted">Nhập đầy đủ URL của trang web cần quét, bao gồm cả http:// hoặc https://</p>
+        </div>
+    </div>
+    
+    <div class="usage-step">
+        <div class="step-number">2</div>
+        <div>
+            <h5>Chọn các loại lỗ hổng cần quét</h5>
+            <p class="text-muted">Bạn có thể chọn một hoặc nhiều loại lỗ hổng để quét. Mỗi loại sẽ tìm kiếm các vấn đề bảo mật khác nhau.</p>
+        </div>
+    </div>
+    
+    <div class="usage-step">
+        <div class="step-number">3</div>
+        <div>
+            <h5>Nhấn "Bắt đầu quét" và đợi kết quả</h5>
+            <p class="text-muted">Quá trình quét có thể mất một ít thời gian tùy thuộc vào quy mô của trang web và số lượng lỗ hổng cần quét.</p>
+        </div>
+    </div>
+    
+    <div class="alert alert-warning">
+        <i class="fas fa-exclamation-triangle me-2"></i>
+        <strong>Lưu ý:</strong> Chỉ sử dụng công cụ này để quét các trang web mà bạn có quyền hợp pháp để thực hiện kiểm tra bảo mật. Việc sử dụng công cụ này để quét các trang web không được phép có thể vi phạm pháp luật.
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    $(document).ready(function() {
+        // Select all vulnerabilities
+        $('#select-all-btn').click(function() {
+            $('input[type="checkbox"]').prop('checked', true);
+        });
+        
+        // Form validation
+        $('#scan-form').submit(function(e) {
+            // Check if at least one vulnerability is selected
+            if ($('input[type="checkbox"]:checked').length === 0) {
+                e.preventDefault();
+                alert('Vui lòng chọn ít nhất một loại lỗ hổng để quét!');
+                return false;
+            }
+            
+            // Check if URL is valid
+            var url = $('input[name="url"]').val();
+            if (!url.match(/^(http|https):\/\/[a-z0-9]+([\-\.]{1}[a-z0-9]+)*\.[a-z]{2,}(:[0-9]{1,5})?(\/.*)?$/i)) {
+                e.preventDefault();
+                alert('Vui lòng nhập một URL hợp lệ (bao gồm http:// hoặc https://)');
+                return false;
+            }
+            
+            // Show loading state
+            $('#scan-button').html('<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span> Đang bắt đầu quét...');
+            $('#scan-button').prop('disabled', true);
+            
+            return true;
+        });
+    });
+</script>
+{% endblock %} 

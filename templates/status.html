@@ -1,0 +1,496 @@
+{% extends "layout.html" %}
+
+{% block title %}Trạng thái quét - Vulnerability Scanner{% endblock %}
+
+{% block head %}
+<style>
+    .status-card {
+        border-radius: 10px;
+        box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
+        overflow: hidden;
+    }
+    .status-header {
+        background: linear-gradient(135deg, #4a00e0, #8e2de2);
+        color: white;
+        padding: 1.5rem;
+    }
+    .log-container {
+        background-color: #1e1e1e;
+        color: #f8f8f8;
+        border-radius: 8px;
+        padding: 1rem;
+        font-family: 'Courier New', monospace;
+        max-height: 400px;
+        overflow-y: auto;
+    }
+    .log-entry {
+        margin-bottom: 0.5rem;
+        line-height: 1.5;
+    }
+    .log-info {
+        color: #63c5da;
+    }
+    .log-warning {
+        color: #ffd700;
+    }
+    .log-error {
+        color: #ff6b6b;
+    }
+    .log-success {
+        color: #00cc66;
+    }
+    .progress-container {
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        padding: 1rem;
+        margin-bottom: 1rem;
+    }
+    .vulnerability-badge {
+        font-size: 0.85rem;
+        margin-right: 0.5rem;
+        margin-bottom: 0.5rem;
+    }
+    #scan-summary {
+        background-color: #f8f9fa;
+        border-radius: 8px;
+        padding: 1.5rem;
+        margin-top: 1.5rem;
+    }
+    .status-spinner {
+        width: 2rem;
+        height: 2rem;
+    }
+    .result-item {
+        border-left: 4px solid;
+        padding-left: 1rem;
+        margin-bottom: 1rem;
+    }
+    .result-item.vulnerable {
+        border-left-color: #dc3545;
+    }
+    .result-item.safe {
+        border-left-color: #198754;
+    }
+    .agent-container {
+        border-radius: 8px;
+        padding: 1rem;
+        margin-bottom: 1rem;
+        background-color: #f0f0f0;
+        border-left: 4px solid #4a00e0;
+    }
+    .agent-icon {
+        font-size: 1.5rem;
+        color: #4a00e0;
+    }
+    .agent-task {
+        font-size: 0.9rem;
+        color: #666;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="status-card">
+    <div class="status-header">
+        <div class="d-flex justify-content-between align-items-center">
+            <h2><i class="fas fa-radar"></i> Quét lỗ hổng</h2>
+            <div>
+                <a href="{{ url_for('index') }}" class="btn btn-outline-light">
+                    <i class="fas fa-home"></i> Trang chủ
+                </a>
+                {% if status != "running" %}
+                <a href="{{ url_for('view_report', scan_id=scan_id) }}" class="btn btn-light ms-2">
+                    <i class="fas fa-file-alt"></i> Xem báo cáo đầy đủ
+                </a>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    <div class="card-body">
+        <div class="mb-4">
+            <h4 class="mb-3">Thông tin quét</h4>
+            <div class="row">
+                <div class="col-md-6">
+                    <p><strong>URL:</strong> <a href="{{ url }}" target="_blank">{{ url }}</a></p>
+                    <p><strong>Thời gian bắt đầu:</strong> {{ start_time }}</p>
+                    <p><strong>ID quét:</strong> <code>{{ scan_id }}</code></p>
+                </div>
+                <div class="col-md-6">
+                    <p>
+                        <strong>Trạng thái:</strong>
+                        {% if status == "running" %}
+                        <span class="badge bg-primary"><i class="fas fa-spinner fa-spin"></i> Đang quét</span>
+                        {% elif status == "completed" %}
+                        <span class="badge bg-success"><i class="fas fa-check"></i> Hoàn thành</span>
+                        {% elif status == "error" %}
+                        <span class="badge bg-danger"><i class="fas fa-exclamation-triangle"></i> Lỗi</span>
+                        {% endif %}
+                    </p>
+                    <p><strong>Loại lỗ hổng quét:</strong></p>
+                    <div>
+                        {% for vuln in vulnerabilities %}
+                        {% if vuln == "xss" %}
+                        <span class="badge bg-danger vulnerability-badge">XSS</span>
+                        {% elif vuln == "sqli" %}
+                        <span class="badge bg-warning text-dark vulnerability-badge">SQL Injection</span>
+                        {% elif vuln == "open_redirect" %}
+                        <span class="badge bg-primary vulnerability-badge">Open Redirect</span>
+                        {% elif vuln == "path_traversal" %}
+                        <span class="badge bg-info text-dark vulnerability-badge">Path Traversal</span>
+                        {% elif vuln == "csrf" %}
+                        <span class="badge bg-success vulnerability-badge">CSRF</span>
+                        {% endif %}
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tiến trình -->
+        {% if status == "running" %}
+        <div class="progress-container">
+            <h4 class="mb-3">Tiến độ quét <span id="progress-percentage" class="float-end">0%</span></h4>
+            <div class="progress" style="height: 25px;">
+                <div id="progress-bar" class="progress-bar progress-bar-striped progress-bar-animated" 
+                    role="progressbar" style="width: 0%;" 
+                    aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
+            </div>
+        </div>
+        {% endif %}
+        
+        <!-- Hoạt động của AI Agents -->
+        <div class="mb-4">
+            <h4 class="mb-3">AI Agents đang hoạt động</h4>
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <div class="agent-container">
+                        <div class="d-flex align-items-center mb-2">
+                            <div class="agent-icon me-3">
+                                <i class="fas fa-spider"></i>
+                            </div>
+                            <div>
+                                <h5 class="mb-0">Crawler Agent</h5>
+                                <div class="agent-task">Nhiệm vụ: Thu thập thông tin, dò tìm endpoint</div>
+                            </div>
+                        </div>
+                        <div class="agent-status" id="crawler-status">
+                            {% if status == "running" %}
+                            <div class="d-flex align-items-center">
+                                <div class="spinner-grow spinner-grow-sm text-primary me-2" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <span>Đang dò tìm endpoints...</span>
+                            </div>
+                            {% else %}
+                            <span class="text-success"><i class="fas fa-check-circle"></i> Hoàn thành</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-md-6">
+                    <div class="agent-container">
+                        <div class="d-flex align-items-center mb-2">
+                            <div class="agent-icon me-3">
+                                <i class="fas fa-shield-alt"></i>
+                            </div>
+                            <div>
+                                <h5 class="mb-0">Scanner Agent</h5>
+                                <div class="agent-task">Nhiệm vụ: Quét các lỗ hổng bảo mật</div>
+                            </div>
+                        </div>
+                        <div class="agent-status" id="scanner-status">
+                            {% if status == "running" %}
+                            <div class="d-flex align-items-center">
+                                <div class="spinner-grow spinner-grow-sm text-primary me-2" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <span>Đang quét lỗ hổng...</span>
+                            </div>
+                            {% else %}
+                            <span class="text-success"><i class="fas fa-check-circle"></i> Hoàn thành</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-md-6">
+                    <div class="agent-container">
+                        <div class="d-flex align-items-center mb-2">
+                            <div class="agent-icon me-3">
+                                <i class="fas fa-info-circle"></i>
+                            </div>
+                            <div>
+                                <h5 class="mb-0">Info Gatherer Agent</h5>
+                                <div class="agent-task">Nhiệm vụ: Thu thập thông tin chi tiết về server</div>
+                            </div>
+                        </div>
+                        <div class="agent-status" id="info-gatherer-status">
+                            {% if status == "running" %}
+                            <div class="d-flex align-items-center">
+                                <div class="spinner-grow spinner-grow-sm text-primary me-2" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <span>Đang thu thập thông tin...</span>
+                            </div>
+                            {% else %}
+                            <span class="text-success"><i class="fas fa-check-circle"></i> Hoàn thành</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-md-6">
+                    <div class="agent-container">
+                        <div class="d-flex align-items-center mb-2">
+                            <div class="agent-icon me-3">
+                                <i class="fas fa-brain"></i>
+                            </div>
+                            <div>
+                                <h5 class="mb-0">Security Analyst Agent</h5>
+                                <div class="agent-task">Nhiệm vụ: Phân tích và tổng hợp kết quả</div>
+                            </div>
+                        </div>
+                        <div class="agent-status" id="security-analyst-status">
+                            {% if status == "running" %}
+                            <div class="d-flex align-items-center">
+                                <div class="spinner-grow spinner-grow-sm text-primary me-2" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <span>Chờ kết quả từ các agent khác...</span>
+                            </div>
+                            {% elif status == "completed" %}
+                            <span class="text-success"><i class="fas fa-check-circle"></i> Hoàn thành phân tích</span>
+                            {% else %}
+                            <span class="text-danger"><i class="fas fa-times-circle"></i> Quá trình bị gián đoạn</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Nhật ký quét -->
+        <div class="mb-4">
+            <h4 class="mb-3">Nhật ký quét</h4>
+            <div class="log-container" id="scan-log">
+                <div class="log-entry log-info">
+                    <span class="text-secondary">[{{ start_time }}]</span> Bắt đầu quét URL: {{ url }}
+                </div>
+                {% if status == "running" %}
+                <div class="log-entry log-info">
+                    <span class="text-secondary">[{{ start_time }}]</span> Đang khởi tạo các AI Agent...
+                </div>
+                <div class="log-entry log-info" id="crawling-log">
+                    <span class="text-secondary">[{{ start_time }}]</span> Crawler Agent đang dò tìm các endpoints...
+                </div>
+                {% elif status == "completed" %}
+                <div class="log-entry log-success">
+                    <span class="text-secondary">[{{ end_time }}]</span> Quét hoàn tất! Đã tìm thấy các kết quả.
+                </div>
+                {% elif status == "error" %}
+                <div class="log-entry log-error">
+                    <span class="text-secondary">[{{ end_time }}]</span> Lỗi: {{ error }}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Kết quả Sơ bộ (nếu hoàn thành) -->
+        {% if status == "completed" %}
+        <div id="scan-summary" class="mt-4">
+            <h4 class="mb-3">Kết quả sơ bộ</h4>
+            
+            <div class="mb-4">
+                <h5>Mức độ rủi ro tổng thể: 
+                    {% if overall_risk == "High" %}
+                    <span class="badge bg-danger">Cao</span>
+                    {% elif overall_risk == "Medium" %}
+                    <span class="badge bg-warning text-dark">Trung bình</span>
+                    {% elif overall_risk == "Low" %}
+                    <span class="badge bg-info text-dark">Thấp</span>
+                    {% else %}
+                    <span class="badge bg-success">Không có</span>
+                    {% endif %}
+                </h5>
+            </div>
+            
+            <div class="row">
+                {% for vuln_type, result in results.items() %}
+                <div class="col-lg-6 mb-3">
+                    <div class="card h-100 result-item {% if result.vulnerable %}vulnerable{% else %}safe{% endif %}">
+                        <div class="card-body">
+                            <h5 class="card-title">
+                                {% if vuln_type == "xss" %}
+                                <i class="fas fa-code text-danger me-2"></i>Cross-Site Scripting (XSS)
+                                {% elif vuln_type == "sqli" %}
+                                <i class="fas fa-database text-warning me-2"></i>SQL Injection
+                                {% elif vuln_type == "open_redirect" %}
+                                <i class="fas fa-external-link-alt text-primary me-2"></i>Open Redirect
+                                {% elif vuln_type == "path_traversal" %}
+                                <i class="fas fa-folder-open text-info me-2"></i>Path Traversal
+                                {% elif vuln_type == "csrf" %}
+                                <i class="fas fa-random text-success me-2"></i>CSRF
+                                {% endif %}
+                            </h5>
+                            
+                            {% if result.vulnerable %}
+                            <div class="alert alert-danger">
+                                <i class="fas fa-exclamation-triangle"></i> Phát hiện lỗ hổng!
+                            </div>
+                            {% if result.payloads %}
+                            <p><strong>Payload hoạt động:</strong></p>
+                            <pre class="bg-light p-2 rounded"><code>{{ result.payloads[0] }}</code></pre>
+                            {% endif %}
+                            {% else %}
+                            <div class="alert alert-success">
+                                <i class="fas fa-check-circle"></i> Không phát hiện lỗ hổng
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            
+            <div class="mt-4">
+                <a href="{{ url_for('view_report', scan_id=scan_id) }}" class="btn btn-primary">
+                    <i class="fas fa-file-alt me-2"></i>Xem báo cáo đầy đủ
+                </a>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    $(document).ready(function() {
+        {% if status == "running" %}
+        // Cập nhật trạng thái quét mỗi 3 giây
+        const updateInterval = setInterval(updateScanStatus, 3000);
+        
+        function updateScanStatus() {
+            $.getJSON("{{ url_for('api_scan_status', scan_id=scan_id) }}", function(data) {
+                // Cập nhật tiến độ
+                const progress = data.progress;
+                $("#progress-bar").css("width", progress + "%");
+                $("#progress-bar").attr("aria-valuenow", progress);
+                $("#progress-bar").text(progress + "%");
+                $("#progress-percentage").text(progress + "%");
+                
+                // Cập nhật trạng thái
+                if (data.status !== "running") {
+                    clearInterval(updateInterval);
+                    
+                    // Thêm log hoàn thành
+                    const completionLog = data.status === "completed" ? 
+                        '<div class="log-entry log-success"><span class="text-secondary">[' + data.end_time + ']</span> Quét hoàn tất! Đã tìm thấy kết quả.</div>' : 
+                        '<div class="log-entry log-error"><span class="text-secondary">[' + data.end_time + ']</span> Lỗi: ' + data.error + '</div>';
+                    $("#scan-log").append(completionLog);
+                    
+                    // Cập nhật trạng thái agent
+                    $("#crawler-status, #scanner-status, #info-gatherer-status, #security-analyst-status").html(
+                        '<span class="text-success"><i class="fas fa-check-circle"></i> Hoàn thành</span>'
+                    );
+                    
+                    // Tải lại trang sau một khoảng thời gian để hiển thị kết quả
+                    setTimeout(function() {
+                        location.reload();
+                    }, 2000);
+                }
+                
+                // Cập nhật thay đổi trong trạng thái quét
+                if (data.agent_status) {
+                    updateAgentStatus(data.agent_status);
+                }
+                
+                // Cập nhật log với thông tin mới nếu có
+                if (data.recent_logs && data.recent_logs.length > 0) {
+                    for (const log of data.recent_logs) {
+                        addLogEntry(log.time, log.message, log.level);
+                    }
+                }
+            }).fail(function() {
+                // Xử lý lỗi khi không thể lấy trạng thái
+                $("#scan-log").append(
+                    '<div class="log-entry log-warning">' +
+                    '<span class="text-secondary">[' + new Date().toLocaleTimeString() + ']</span> ' +
+                    'Không thể cập nhật trạng thái quét. Đang thử lại...' +
+                    '</div>'
+                );
+            });
+        }
+        
+        function updateAgentStatus(agentStatus) {
+            if (agentStatus.crawler) {
+                $("#crawler-status").html(
+                    '<div class="d-flex align-items-center">' +
+                    '<div class="spinner-grow spinner-grow-sm text-primary me-2" role="status">' +
+                    '<span class="visually-hidden">Loading...</span>' +
+                    '</div>' +
+                    '<span>' + agentStatus.crawler + '</span>' +
+                    '</div>'
+                );
+            }
+            
+            if (agentStatus.scanner) {
+                $("#scanner-status").html(
+                    '<div class="d-flex align-items-center">' +
+                    '<div class="spinner-grow spinner-grow-sm text-primary me-2" role="status">' +
+                    '<span class="visually-hidden">Loading...</span>' +
+                    '</div>' +
+                    '<span>' + agentStatus.scanner + '</span>' +
+                    '</div>'
+                );
+            }
+            
+            if (agentStatus.info_gatherer) {
+                $("#info-gatherer-status").html(
+                    '<div class="d-flex align-items-center">' +
+                    '<div class="spinner-grow spinner-grow-sm text-primary me-2" role="status">' +
+                    '<span class="visually-hidden">Loading...</span>' +
+                    '</div>' +
+                    '<span>' + agentStatus.info_gatherer + '</span>' +
+                    '</div>'
+                );
+            }
+            
+            if (agentStatus.security_analyst) {
+                $("#security-analyst-status").html(
+                    '<div class="d-flex align-items-center">' +
+                    '<div class="spinner-grow spinner-grow-sm text-primary me-2" role="status">' +
+                    '<span class="visually-hidden">Loading...</span>' +
+                    '</div>' +
+                    '<span>' + agentStatus.security_analyst + '</span>' +
+                    '</div>'
+                );
+            }
+        }
+        
+        function addLogEntry(time, message, level) {
+            level = level || "info";
+            const logClass = level === "error" ? "log-error" : 
+                            level === "warning" ? "log-warning" : 
+                            level === "success" ? "log-success" : "log-info";
+            
+            const logEntry = 
+                '<div class="log-entry ' + logClass + '">' +
+                '<span class="text-secondary">[' + time + ']</span> ' + message +
+                '</div>';
+            
+            $("#scan-log").append(logEntry);
+            
+            // Cuộn xuống để hiển thị log mới nhất
+            const logContainer = document.getElementById("scan-log");
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+        
+        // Gọi cập nhật trạng thái ngay lập tức
+        updateScanStatus();
+        {% endif %}
+    });
+</script>
+{% endblock %} 

@@ -1,0 +1,40 @@
+{
+    "id": "20250510155121",
+    "url": "http://testphp.vulnweb.com/",
+    "start_time": "2025-05-10 15:51:21",
+    "status": "error",
+    "scan_type": "basic",
+    "vulnerabilities": [
+        "xss",
+        "sqli"
+    ],
+    "use_deepseek": true,
+    "progress": 100,
+    "logs": [
+        {
+            "time": "15:51:21",
+            "message": "Target URL: http://testphp.vulnweb.com/"
+        },
+        {
+            "time": "15:51:21",
+            "message": "Using DeepSeek API with 128K context window"
+        },
+        {
+            "time": "15:51:21",
+            "message": "Creating specialized agents for scanning"
+        },
+        {
+            "time": "15:51:21",
+            "message": "Setting up basic scan (common vulnerabilities)"
+        },
+        {
+            "time": "15:51:21",
+            "message": "Unidentified error: 'Agent' object has no attribute 'name'"
+        }
+    ],
+    "agent_status": {
+        "setup": "Configuring basic scan"
+    },
+    "end_time": "2025-05-10 15:51:21",
+    "error": "Unidentified error: 'Agent' object has no attribute 'name'"
+}
