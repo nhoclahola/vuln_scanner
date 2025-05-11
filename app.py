@@ -1070,19 +1070,16 @@ def view_report(scan_id):
     elif "Low Risk" in final_answer or "Low vulnerability" in final_answer:
         overall_risk = "Low"
     
+    # Thêm các thông tin cần thiết vào đối tượng data
+    data['raw_report'] = final_answer
+    data['overall_risk'] = overall_risk
+    data['results'] = results
+    data['use_markdown'] = True
+    
     return render_template(
         'report.html',
         scan_id=scan_id,
-        url=data.get("url"),
-        start_time=data.get("start_time"),
-        end_time=data.get("end_time", ""),
-        scan_type=data.get("scan_type", "basic"),
-        vulnerabilities=data.get("vulnerabilities", []),
-        raw_report=final_answer,  # Use the extracted final answer
-        html_report="",  # Don't convert to HTML, display raw markdown
-        results=results,
-        overall_risk=overall_risk,
-        use_markdown=True  # Flag to use markdown rendering in the template
+        data=data
     )
 
 @app.route('/history')

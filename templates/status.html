@@ -98,7 +98,7 @@
                 <a href="{{ url_for('index') }}" class="btn btn-outline-light">
                     <i class="fas fa-home"></i> Trang chủ
                 </a>
-                {% if status != "running" %}
+                {% if data.status != "running" %}
                 <a href="{{ url_for('view_report', scan_id=scan_id) }}" class="btn btn-light ms-2">
                     <i class="fas fa-file-alt"></i> Xem báo cáo đầy đủ
                 </a>
@@ -112,35 +112,45 @@
             <h4 class="mb-3">Thông tin quét</h4>
             <div class="row">
                 <div class="col-md-6">
-                    <p><strong>URL:</strong> <a href="{{ url }}" target="_blank">{{ url }}</a></p>
-                    <p><strong>Thời gian bắt đầu:</strong> {{ start_time }}</p>
+                    <p><strong>URL:</strong> <a href="{{ data.url }}" target="_blank">{{ data.url }}</a></p>
+                    <p><strong>Thời gian bắt đầu:</strong> {{ data.start_time }}</p>
                     <p><strong>ID quét:</strong> <code>{{ scan_id }}</code></p>
                 </div>
                 <div class="col-md-6">
                     <p>
                         <strong>Trạng thái:</strong>
-                        {% if status == "running" %}
+                        {% if data.status == "running" %}
                         <span class="badge bg-primary"><i class="fas fa-spinner fa-spin"></i> Đang quét</span>
-                        {% elif status == "completed" %}
+                        {% elif data.status == "completed" %}
                         <span class="badge bg-success"><i class="fas fa-check"></i> Hoàn thành</span>
-                        {% elif status == "error" %}
+                        {% elif data.status == "error" %}
                         <span class="badge bg-danger"><i class="fas fa-exclamation-triangle"></i> Lỗi</span>
+                        {% else %}
+                        <span class="badge bg-secondary">{{ data.status }}</span>
                         {% endif %}
                     </p>
-                    <p><strong>Loại lỗ hổng quét:</strong></p>
-                    <div>
-                        {% for vuln in vulnerabilities %}
-                        {% if vuln == "xss" %}
-                        <span class="badge bg-danger vulnerability-badge">XSS</span>
-                        {% elif vuln == "sqli" %}
-                        <span class="badge bg-warning text-dark vulnerability-badge">SQL Injection</span>
-                        {% elif vuln == "open_redirect" %}
-                        <span class="badge bg-primary vulnerability-badge">Open Redirect</span>
-                        {% elif vuln == "path_traversal" %}
-                        <span class="badge bg-info text-dark vulnerability-badge">Path Traversal</span>
-                        {% elif vuln == "csrf" %}
-                        <span class="badge bg-success vulnerability-badge">CSRF</span>
+                    <p>
+                        <strong>Loại quét:</strong>
+                        {% if scan_type == "basic" %}
+                        <span class="badge bg-primary">Quét cơ bản</span>
+                        {% elif scan_type == "full" %}
+                        <span class="badge bg-danger">Quét toàn diện</span>
                         {% endif %}
+                    </p>
+                    <p><strong>Lỗ hổng được quét:</strong></p>
+                    <div>
+                        {% for vuln_key, vuln_name in vulnerabilities_checked.items() %}
+                            {% if vuln_key == "xss" %}
+                            <span class="badge bg-danger vulnerability-badge">{{ vuln_name }}</span>
+                            {% elif vuln_key == "sqli" %}
+                            <span class="badge bg-warning text-dark vulnerability-badge">{{ vuln_name }}</span>
+                            {% elif vuln_key == "open_redirect" %}
+                            <span class="badge bg-primary vulnerability-badge">{{ vuln_name }}</span>
+                            {% elif vuln_key == "path_traversal" %}
+                            <span class="badge bg-info text-dark vulnerability-badge">{{ vuln_name }}</span>
+                            {% elif vuln_key == "csrf" %}
+                            <span class="badge bg-success vulnerability-badge">{{ vuln_name }}</span>
+                            {% endif %}
                         {% endfor %}
                     </div>
                 </div>
@@ -148,13 +158,13 @@
         </div>
 
         <!-- Tiến trình -->
-        {% if status == "running" %}
+        {% if data.status == "running" %}
         <div class="progress-container">
-            <h4 class="mb-3">Tiến độ quét <span id="progress-percentage" class="float-end">0%</span></h4>
+            <h4 class="mb-3">Tiến độ quét <span id="progress-percentage" class="float-end">{{ data.progress }}%</span></h4>
             <div class="progress" style="height: 25px;">
                 <div id="progress-bar" class="progress-bar progress-bar-striped progress-bar-animated" 
-                    role="progressbar" style="width: 0%;" 
-                    aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
+                    role="progressbar" style="width: {{ data.progress }}%;" 
+                    aria-valuenow="{{ data.progress }}" aria-valuemin="0" aria-valuemax="100">{{ data.progress }}%</div>
             </div>
         </div>
         {% endif %}
@@ -175,7 +185,7 @@
                             </div>
                         </div>
                         <div class="agent-status" id="crawler-status">
-                            {% if status == "running" %}
+                            {% if data.status == "running" %}
                             <div class="d-flex align-items-center">
                                 <div class="spinner-grow spinner-grow-sm text-primary me-2" role="status">
                                     <span class="visually-hidden">Loading...</span>
@@ -201,7 +211,7 @@
                             </div>
                         </div>
                         <div class="agent-status" id="scanner-status">
-                            {% if status == "running" %}
+                            {% if data.status == "running" %}
                             <div class="d-flex align-items-center">
                                 <div class="spinner-grow spinner-grow-sm text-primary me-2" role="status">
                                     <span class="visually-hidden">Loading...</span>
@@ -227,7 +237,7 @@
                             </div>
                         </div>
                         <div class="agent-status" id="info-gatherer-status">
-                            {% if status == "running" %}
+                            {% if data.status == "running" %}
                             <div class="d-flex align-items-center">
                                 <div class="spinner-grow spinner-grow-sm text-primary me-2" role="status">
                                     <span class="visually-hidden">Loading...</span>
@@ -253,14 +263,14 @@
                             </div>
                         </div>
                         <div class="agent-status" id="security-analyst-status">
-                            {% if status == "running" %}
+                            {% if data.status == "running" %}
                             <div class="d-flex align-items-center">
                                 <div class="spinner-grow spinner-grow-sm text-primary me-2" role="status">
                                     <span class="visually-hidden">Loading...</span>
                                 </div>
                                 <span>Chờ kết quả từ các agent khác...</span>
                             </div>
-                            {% elif status == "completed" %}
+                            {% elif data.status == "completed" %}
                             <span class="text-success"><i class="fas fa-check-circle"></i> Hoàn thành phân tích</span>
                             {% else %}
                             <span class="text-danger"><i class="fas fa-times-circle"></i> Quá trình bị gián đoạn</span>
@@ -276,29 +286,29 @@
             <h4 class="mb-3">Nhật ký quét</h4>
             <div class="log-container" id="scan-log">
                 <div class="log-entry log-info">
-                    <span class="text-secondary">[{{ start_time }}]</span> Bắt đầu quét URL: {{ url }}
+                    <span class="text-secondary">[{{ data.start_time }}]</span> Bắt đầu quét URL: {{ data.url }}
                 </div>
-                {% if status == "running" %}
+                {% if data.status == "running" %}
                 <div class="log-entry log-info">
-                    <span class="text-secondary">[{{ start_time }}]</span> Đang khởi tạo các AI Agent...
+                    <span class="text-secondary">[{{ data.start_time }}]</span> Đang khởi tạo các AI Agent...
                 </div>
                 <div class="log-entry log-info" id="crawling-log">
-                    <span class="text-secondary">[{{ start_time }}]</span> Crawler Agent đang dò tìm các endpoints...
+                    <span class="text-secondary">[{{ data.start_time }}]</span> Crawler Agent đang dò tìm các endpoints...
                 </div>
-                {% elif status == "completed" %}
+                {% elif data.status == "completed" %}
                 <div class="log-entry log-success">
-                    <span class="text-secondary">[{{ end_time }}]</span> Quét hoàn tất! Đã tìm thấy các kết quả.
+                    <span class="text-secondary">[{{ data.end_time }}]</span> Quét hoàn tất! Đã tìm thấy các kết quả.
                 </div>
-                {% elif status == "error" %}
+                {% elif data.status == "error" %}
                 <div class="log-entry log-error">
-                    <span class="text-secondary">[{{ end_time }}]</span> Lỗi: {{ error }}
+                    <span class="text-secondary">[{{ data.end_time }}]</span> Lỗi: {{ data.error }}
                 </div>
                 {% endif %}
             </div>
         </div>
 
         <!-- Kết quả Sơ bộ (nếu hoàn thành) -->
-        {% if status == "completed" %}
+        {% if data.status == "completed" %}
         <div id="scan-summary" class="mt-4">
             <h4 class="mb-3">Kết quả sơ bộ</h4>
             
@@ -368,7 +378,7 @@
 {% block scripts %}
 <script>
     $(document).ready(function() {
-        {% if status == "running" %}
+        {% if data.status == "running" %}
         // Cập nhật trạng thái quét mỗi 3 giây
         const updateInterval = setInterval(updateScanStatus, 3000);
         

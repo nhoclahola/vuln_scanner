@@ -1,6 +1,6 @@
 {% extends "layout.html" %}
 
-{% block title %}Vulnerability Scan Report - {{ url }}{% endblock %}
+{% block title %}Vulnerability Scan Report - {{ data.url }}{% endblock %}
 
 {% block head %}
 <style>
@@ -216,11 +216,11 @@
             </a>
         </div>
     </div>
-    <p class="lead mb-0">URL: <a href="{{ url }}" target="_blank" class="text-white">{{ url }}</a></p>
-    <p>Scan Time: {{ start_time }} - {{ end_time }}</p>
+    <p class="lead mb-0">URL: <a href="{{ data.url }}" target="_blank" class="text-white">{{ data.url }}</a></p>
+    <p>Scan Time: {{ data.start_time }} - {{ data.end_time }}</p>
     
     <div class="d-flex flex-wrap mt-3">
-        {% for vuln in vulnerabilities %}
+        {% for vuln in data.vulnerabilities %}
         {% if vuln == "xss" %}
         <span class="badge bg-danger vulnerability-badge me-2">XSS</span>
         {% elif vuln == "sqli" %}
@@ -242,13 +242,13 @@
     
     <div class="mb-4">
         <h3>Overall Risk Level:
-            {% if overall_risk == "Critical" %}
+            {% if data.overall_risk == "Critical" %}
             <span class="risk-badge risk-critical">Critical</span>
-            {% elif overall_risk == "High" %}
+            {% elif data.overall_risk == "High" %}
             <span class="risk-badge risk-high">High</span>
-            {% elif overall_risk == "Medium" %}
+            {% elif data.overall_risk == "Medium" %}
             <span class="risk-badge risk-medium">Medium</span>
-            {% elif overall_risk == "Low" %}
+            {% elif data.overall_risk == "Low" %}
             <span class="risk-badge risk-low">Low</span>
             {% else %}
             <span class="risk-badge risk-none">None</span>
@@ -256,93 +256,163 @@
         </h3>
     </div>
     
-    <div class="row mb-4">
-        <!-- Count vulnerable categories -->
-        {% set high_vuln_count = [('sqli' in results and results.sqli.vulnerable), ('path_traversal' in results and results.path_traversal.vulnerable)]|select|list|length %}
-        {% set medium_vuln_count = [('xss' in results and results.xss.vulnerable), ('csrf' in results and results.csrf.vulnerable)]|select|list|length %}
-        {% set low_vuln_count = [('open_redirect' in results and results.open_redirect.vulnerable)]|select|list|length %}
-        
-        {% if high_vuln_count > 0 %}
+    <div class="row">
+        {% if "xss" in data.results %}
         <div class="col-md-4">
-            <div class="summary-box high">
-                <h4>High Risk</h4>
-                <div class="summary-count mb-2">{{ high_vuln_count }}</div>
-                <p class="mb-0">High severity vulnerabilities detected</p>
+            <div class="summary-box {% if data.results.xss.vulnerable %}high{% else %}none{% endif %}">
+                <h4>Cross-Site Scripting (XSS)</h4>
+                <div class="mt-3 d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="summary-count">
+                            {% if data.results.xss.vulnerable %}1{% else %}0{% endif %}
+                        </div>
+                        <div>{% if data.results.xss.vulnerable %}Vulnerable{% else %}Not Vulnerable{% endif %}</div>
+                    </div>
+                    <i class="fas {% if data.results.xss.vulnerable %}fa-times-circle{% else %}fa-check-circle{% endif %} fa-3x"></i>
+                </div>
             </div>
         </div>
         {% endif %}
         
-        {% if medium_vuln_count > 0 %}
+        {% if "sqli" in data.results %}
         <div class="col-md-4">
-            <div class="summary-box medium">
-                <h4>Medium Risk</h4>
-                <div class="summary-count mb-2">{{ medium_vuln_count }}</div>
-                <p class="mb-0">Medium severity vulnerabilities detected</p>
+            <div class="summary-box {% if data.results.sqli.vulnerable %}high{% else %}none{% endif %}">
+                <h4>SQL Injection</h4>
+                <div class="mt-3 d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="summary-count">
+                            {% if data.results.sqli.vulnerable %}1{% else %}0{% endif %}
+                        </div>
+                        <div>{% if data.results.sqli.vulnerable %}Vulnerable{% else %}Not Vulnerable{% endif %}</div>
+                    </div>
+                    <i class="fas {% if data.results.sqli.vulnerable %}fa-times-circle{% else %}fa-check-circle{% endif %} fa-3x"></i>
+                </div>
             </div>
         </div>
         {% endif %}
         
-        {% if low_vuln_count > 0 %}
+        {% if "open_redirect" in data.results %}
         <div class="col-md-4">
-            <div class="summary-box low">
-                <h4>Low Risk</h4>
-                <div class="summary-count mb-2">{{ low_vuln_count }}</div>
-                <p class="mb-0">Low severity vulnerabilities detected</p>
+            <div class="summary-box {% if data.results.open_redirect.vulnerable %}medium{% else %}none{% endif %}">
+                <h4>Open Redirect</h4>
+                <div class="mt-3 d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="summary-count">
+                            {% if data.results.open_redirect.vulnerable %}1{% else %}0{% endif %}
+                        </div>
+                        <div>{% if data.results.open_redirect.vulnerable %}Vulnerable{% else %}Not Vulnerable{% endif %}</div>
+                    </div>
+                    <i class="fas {% if data.results.open_redirect.vulnerable %}fa-times-circle{% else %}fa-check-circle{% endif %} fa-3x"></i>
+                </div>
             </div>
         </div>
         {% endif %}
         
-        {% if high_vuln_count == 0 and medium_vuln_count == 0 and low_vuln_count == 0 %}
-        <div class="col-md-12">
-            <div class="summary-box none">
-                <h4>No Vulnerabilities</h4>
-                <div class="summary-count mb-2">0</div>
-                <p class="mb-0">No significant security vulnerabilities detected</p>
+        {% if "path_traversal" in data.results %}
+        <div class="col-md-4 mt-4">
+            <div class="summary-box {% if data.results.path_traversal.vulnerable %}high{% else %}none{% endif %}">
+                <h4>Path Traversal</h4>
+                <div class="mt-3 d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="summary-count">
+                            {% if data.results.path_traversal.vulnerable %}1{% else %}0{% endif %}
+                        </div>
+                        <div>{% if data.results.path_traversal.vulnerable %}Vulnerable{% else %}Not Vulnerable{% endif %}</div>
+                    </div>
+                    <i class="fas {% if data.results.path_traversal.vulnerable %}fa-times-circle{% else %}fa-check-circle{% endif %} fa-3x"></i>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+        
+        {% if "csrf" in data.results %}
+        <div class="col-md-4 mt-4">
+            <div class="summary-box {% if data.results.csrf.vulnerable %}medium{% else %}none{% endif %}">
+                <h4>CSRF</h4>
+                <div class="mt-3 d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="summary-count">
+                            {% if data.results.csrf.vulnerable %}1{% else %}0{% endif %}
+                        </div>
+                        <div>{% if data.results.csrf.vulnerable %}Vulnerable{% else %}Not Vulnerable{% endif %}</div>
+                    </div>
+                    <i class="fas {% if data.results.csrf.vulnerable %}fa-times-circle{% else %}fa-check-circle{% endif %} fa-3x"></i>
+                </div>
             </div>
         </div>
         {% endif %}
     </div>
 </div>
 
-<!-- Security Analyst Report -->
+<!-- Detailed Report -->
 <div class="report-section">
-    <h2 class="section-title">Security Analysis Report</h2>
+    <ul class="nav nav-pills mb-3" id="reportTab" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="markdown-tab" data-bs-toggle="pill" 
+                    data-bs-target="#markdown-content" type="button" role="tab" 
+                    aria-controls="markdown-content" aria-selected="true">
+                Markdown Report
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="rendered-tab" data-bs-toggle="pill" 
+                    data-bs-target="#rendered-content" type="button" role="tab" 
+                    aria-controls="rendered-content" aria-selected="false">
+                Rendered Report
+            </button>
+        </li>
+    </ul>
     
-    <div id="markdown-report" class="markdown-content">
-        <!-- This will be filled by JavaScript below -->
+    <div class="tab-content" id="reportTabContent">
+        <div class="tab-pane fade show active" id="markdown-content" role="tabpanel" aria-labelledby="markdown-tab">
+            <pre class="code-block"><code>{{ data.raw_report }}</code></pre>
+        </div>
+        <div class="tab-pane fade" id="rendered-content" role="tabpanel" aria-labelledby="rendered-tab">
+            <div class="markdown-content" id="rendered-markdown"></div>
+        </div>
     </div>
-    
-    <!-- Raw report content (hidden) -->
-    <div id="raw-report-content" style="display: none;">{{ raw_report }}</div>
 </div>
-
 {% endblock %}
 
 {% block scripts %}
 <script>
-    document.addEventListener('DOMContentLoaded', function() {
-        // Parse and render the markdown content
-        const rawReportContent = document.getElementById('raw-report-content').textContent;
-        const markdownContent = document.getElementById('markdown-report');
+    $(document).ready(function() {
+        // Toggle vulnerability details
+        $(".toggle-details").click(function() {
+            $(this).closest(".vulnerability-item").find(".vulnerability-details").slideToggle();
+            $(this).find("i").toggleClass("fa-chevron-down fa-chevron-up");
+        });
         
-        // Configure marked options
-        marked.setOptions({
-            breaks: true,
-            gfm: true,
-            headerIds: true,
-            highlight: function(code, lang) {
-                const language = hljs.getLanguage(lang) ? lang : 'plaintext';
-                return hljs.highlight(code, { language }).value;
+        // Render markdown when switching to rendered tab
+        $('#rendered-tab').on('shown.bs.tab', function (e) {
+            if (!$('#rendered-markdown').html()) {
+                const markdown = {{ data.raw_report|tojson }};
+                $('#rendered-markdown').html(marked.parse(markdown));
+                
+                // Apply syntax highlighting to code blocks
+                document.querySelectorAll('#rendered-markdown pre code').forEach((block) => {
+                    hljs.highlightBlock(block);
+                });
             }
         });
         
-        // Render the markdown to HTML
-        markdownContent.innerHTML = marked.parse(rawReportContent);
-        
-        // Highlight code blocks
-        document.querySelectorAll('pre code').forEach((block) => {
-            hljs.highlightBlock(block);
+        // Handle copy to clipboard for code blocks
+        $(".copy-code").click(function() {
+            const codeBlock = $(this).closest(".code-block-wrapper").find("code");
+            navigator.clipboard.writeText(codeBlock.text()).then(() => {
+                $(this).tooltip('hide')
+                    .attr('data-bs-original-title', 'Copied!')
+                    .tooltip('show');
+                
+                setTimeout(() => {
+                    $(this).tooltip('hide')
+                        .attr('data-bs-original-title', 'Copy to clipboard');
+                }, 1000);
+            });
         });
+        
+        // Initialize tooltips
+        $('[data-bs-toggle="tooltip"]').tooltip();
     });
 </script>
 {% endblock %} 
