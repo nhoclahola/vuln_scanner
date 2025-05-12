@@ -1,0 +1,398 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Vulnerability Scanner{% endblock %}
+
+{% block header_title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    <!-- Stats Cards Row -->
+    <div class="row stats-row">
+        <div class="col-md-3">
+            <div class="card dashboard-card">
+                <div class="card-body">
+                    <div class="stat-icon-container">
+                        <i class="bi bi-shield"></i>
+                    </div>
+                    <h5 class="card-title">Total Scans</h5>
+                    <h2 class="stat-value" id="total-scans">-</h2>
+                    <p class="stat-diff"><i class="bi bi-arrow-up-short"></i> <span id="scan-diff">-</span>% this week</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card dashboard-card">
+                <div class="card-body">
+                    <div class="stat-icon-container" style="background-color: rgba(244, 67, 54, 0.1);">
+                        <i class="bi bi-bug" style="color: #f44336;"></i>
+                    </div>
+                    <h5 class="card-title">Total Vulnerabilities</h5>
+                    <h2 class="stat-value" id="total-vulnerabilities">-</h2>
+                    <p class="stat-diff"><i class="bi bi-arrow-up-short"></i> <span id="vuln-diff">-</span>% this week</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card dashboard-card">
+                <div class="card-body">
+                    <div class="stat-icon-container" style="background-color: rgba(251, 192, 45, 0.1);">
+                        <i class="bi bi-exclamation-triangle" style="color: #fbc02d;"></i>
+                    </div>
+                    <h5 class="card-title">High Risk Issues</h5>
+                    <h2 class="stat-value" id="high-risk-issues">-</h2>
+                    <p class="stat-diff"><i class="bi bi-arrow-down-short"></i> <span id="risk-diff">-</span>% this week</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card dashboard-card">
+                <div class="card-body">
+                    <div class="stat-icon-container" style="background-color: rgba(0, 200, 83, 0.1);">
+                        <i class="bi bi-clock-history" style="color: #00c853;"></i>
+                    </div>
+                    <h5 class="card-title">Avg. Scan Time</h5>
+                    <h2 class="stat-value" id="avg-scan-time">-</h2>
+                    <p class="stat-diff"><i class="bi bi-arrow-up-short"></i> <span id="time-diff">-</span>% this week</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chart and Recent Scans Row -->
+    <div class="row mt-4">
+        <!-- Vulnerability Distribution Chart -->
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title">Vulnerability Distribution</h5>
+                </div>
+                <div class="card-body">
+                    <ul class="nav nav-tabs" id="chartTabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="weekly-tab" data-bs-toggle="tab" data-bs-target="#weekly" type="button" role="tab">Weekly</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="monthly-tab" data-bs-toggle="tab" data-bs-target="#monthly" type="button" role="tab">Monthly</button>
+                        </li>
+                    </ul>
+                    <div class="tab-content mt-3">
+                        <div class="tab-pane fade show active" id="weekly" role="tabpanel">
+                            <canvas id="weeklyChart" height="250"></canvas>
+                        </div>
+                        <div class="tab-pane fade" id="monthly" role="tabpanel">
+                            <canvas id="monthlyChart" height="250"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Scans -->
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title">Recent Scans</h5>
+                </div>
+                <div class="card-body">
+                    <div class="recent-scans-list" id="recent-scans-list">
+                        <div class="text-center py-4">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <a href="{{ url_for('history_page') }}" class="btn btn-sm btn-primary w-100">View All Scans</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Top Vulnerabilities and Agent Performance Row -->
+    <div class="row mt-4">
+        <!-- Top Vulnerabilities -->
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title">Top Vulnerabilities</h5>
+                </div>
+                <div class="card-body">
+                    <table class="table table-hover" id="top-vulnerabilities-table">
+                        <thead>
+                            <tr>
+                                <th>Type</th>
+                                <th>Count</th>
+                                <th>Risk Level</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td colspan="3" class="text-center py-4">
+                                    <div class="spinner-border spinner-border-sm text-primary" role="status">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Agent Performance -->
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title">Agent Performance</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="agent-container p-3 rounded mb-3">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <h6>Web Crawler Agent</h6>
+                                    <span class="badge bg-success">Active</span>
+                                </div>
+                                <div class="progress mt-2" style="height: 6px;">
+                                    <div class="progress-bar" role="progressbar" style="width: 87%;" aria-valuenow="87" aria-valuemin="0" aria-valuemax="100"></div>
+                                </div>
+                                <p class="small text-muted mt-2">87% Success Rate</p>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="agent-container p-3 rounded mb-3">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <h6>Info Gatherer Agent</h6>
+                                    <span class="badge bg-success">Active</span>
+                                </div>
+                                <div class="progress mt-2" style="height: 6px;">
+                                    <div class="progress-bar" role="progressbar" style="width: 92%;" aria-valuenow="92" aria-valuemin="0" aria-valuemax="100"></div>
+                                </div>
+                                <p class="small text-muted mt-2">92% Success Rate</p>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="agent-container p-3 rounded mb-3">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <h6>Endpoint Scanner Agent</h6>
+                                    <span class="badge bg-success">Active</span>
+                                </div>
+                                <div class="progress mt-2" style="height: 6px;">
+                                    <div class="progress-bar" role="progressbar" style="width: 78%;" aria-valuenow="78" aria-valuemin="0" aria-valuemax="100"></div>
+                                </div>
+                                <p class="small text-muted mt-2">78% Success Rate</p>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="agent-container p-3 rounded mb-3">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <h6>Security Analyst Agent</h6>
+                                    <span class="badge bg-success">Active</span>
+                                </div>
+                                <div class="progress mt-2" style="height: 6px;">
+                                    <div class="progress-bar" role="progressbar" style="width: 95%;" aria-valuenow="95" aria-valuemin="0" aria-valuemax="100"></div>
+                                </div>
+                                <p class="small text-muted mt-2">95% Success Rate</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Load recent scans
+    fetch('/api/history')
+        .then(response => response.json())
+        .then(data => {
+            updateDashboardStats(data);
+            populateRecentScans(data);
+            initializeCharts();
+        })
+        .catch(error => console.error('Error loading scan history:', error));
+        
+    // Initialize charts with demo data (will be replaced with real data)
+    function initializeCharts() {
+        // Weekly chart
+        const weeklyCtx = document.getElementById('weeklyChart').getContext('2d');
+        const weeklyChart = new Chart(weeklyCtx, {
+            type: 'bar',
+            data: {
+                labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+                datasets: [
+                    {
+                        label: 'Critical',
+                        data: [5, 3, 7, 2, 6, 4, 8],
+                        backgroundColor: '#d32f2f'
+                    },
+                    {
+                        label: 'High',
+                        data: [12, 8, 14, 9, 16, 10, 15],
+                        backgroundColor: '#f44336'
+                    },
+                    {
+                        label: 'Medium',
+                        data: [20, 15, 18, 22, 16, 19, 21],
+                        backgroundColor: '#ff9800'
+                    },
+                    {
+                        label: 'Low',
+                        data: [25, 22, 28, 20, 24, 27, 23],
+                        backgroundColor: '#4caf50'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        stacked: true,
+                    },
+                    y: {
+                        stacked: true,
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+        
+        // Monthly chart
+        const monthlyCtx = document.getElementById('monthlyChart').getContext('2d');
+        const monthlyChart = new Chart(monthlyCtx, {
+            type: 'bar',
+            data: {
+                labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+                datasets: [
+                    {
+                        label: 'Critical',
+                        data: [15, 12, 18, 10, 16, 14, 20, 11, 13, 17, 19, 22],
+                        backgroundColor: '#d32f2f'
+                    },
+                    {
+                        label: 'High',
+                        data: [30, 25, 35, 22, 28, 32, 38, 24, 26, 33, 36, 40],
+                        backgroundColor: '#f44336'
+                    },
+                    {
+                        label: 'Medium',
+                        data: [45, 40, 50, 38, 42, 48, 55, 41, 43, 46, 52, 58],
+                        backgroundColor: '#ff9800'
+                    },
+                    {
+                        label: 'Low',
+                        data: [60, 55, 65, 50, 58, 63, 70, 56, 59, 62, 67, 72],
+                        backgroundColor: '#4caf50'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        stacked: true,
+                    },
+                    y: {
+                        stacked: true,
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+        
+        // Populate top vulnerabilities table with demo data
+        populateTopVulnerabilities([
+            { type: 'Cross-Site Scripting (XSS)', count: 35, risk: 'High' },
+            { type: 'SQL Injection', count: 28, risk: 'Critical' },
+            { type: 'CSRF', count: 22, risk: 'Medium' },
+            { type: 'Path Traversal', count: 15, risk: 'High' },
+            { type: 'Open Redirect', count: 12, risk: 'Medium' }
+        ]);
+    }
+    
+    function updateDashboardStats(data) {
+        if (!data.history) return;
+        
+        const totalScans = data.history.length;
+        document.getElementById('total-scans').textContent = totalScans;
+        document.getElementById('scan-diff').textContent = '12'; // Demo percentage
+        
+        // Demo values for other stats
+        document.getElementById('total-vulnerabilities').textContent = '187';
+        document.getElementById('vuln-diff').textContent = '8';
+        
+        document.getElementById('high-risk-issues').textContent = '42';
+        document.getElementById('risk-diff').textContent = '5';
+        
+        document.getElementById('avg-scan-time').textContent = '4:32';
+        document.getElementById('time-diff').textContent = '10';
+    }
+    
+    function populateRecentScans(data) {
+        const recentScansList = document.getElementById('recent-scans-list');
+        if (!data.history || data.history.length === 0) {
+            recentScansList.innerHTML = '<p class="text-center">No scan history available</p>';
+            return;
+        }
+        
+        recentScansList.innerHTML = '';
+        const recentScans = data.history.slice(0, 5); // Get last 5 scans
+        
+        recentScans.forEach(scan => {
+            const scanEl = document.createElement('div');
+            scanEl.className = 'recent-scan-item';
+            
+            const scanTypeClass = scan.type === 'full' ? 'bg-primary' : 'bg-info';
+            const scanTypeLabel = scan.type === 'full' ? 'Full Scan' : 'Basic Scan';
+            
+            scanEl.innerHTML = `
+                <div class="d-flex align-items-center mb-3">
+                    <div class="scan-icon ${scanTypeClass}">
+                        <i class="bi bi-shield"></i>
+                    </div>
+                    <div class="scan-info">
+                        <h6 class="mb-0">${scan.url}</h6>
+                        <small class="text-muted">${scan.time}</small>
+                    </div>
+                    <div class="ms-auto">
+                        <span class="badge ${scanTypeClass}">${scanTypeLabel}</span>
+                    </div>
+                </div>
+            `;
+            
+            recentScansList.appendChild(scanEl);
+        });
+    }
+    
+    function populateTopVulnerabilities(vulns) {
+        const table = document.getElementById('top-vulnerabilities-table');
+        const tbody = table.querySelector('tbody');
+        tbody.innerHTML = '';
+        
+        vulns.forEach(vuln => {
+            const row = document.createElement('tr');
+            
+            let riskBadgeClass = 'bg-success';
+            if (vuln.risk === 'Critical') riskBadgeClass = 'bg-danger';
+            else if (vuln.risk === 'High') riskBadgeClass = 'bg-warning text-dark';
+            else if (vuln.risk === 'Medium') riskBadgeClass = 'bg-info text-dark';
+            
+            row.innerHTML = `
+                <td>${vuln.type}</td>
+                <td>${vuln.count}</td>
+                <td><span class="badge ${riskBadgeClass}">${vuln.risk}</span></td>
+            `;
+            
+            tbody.appendChild(row);
+        });
+    }
+});
+</script>
+{% endblock %} 

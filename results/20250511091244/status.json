@@ -1,8 +1,0 @@
-{
-  "status": "error",
-  "progress": 15,
-  "start_time": "2025-05-11 09:12:44",
-  "agent_status": {},
-  "error": "name 'scan_sql_injection' is not defined",
-  "end_time": "2025-05-11 09:12:44"
-}

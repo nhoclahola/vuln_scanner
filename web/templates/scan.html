@@ -1,0 +1,596 @@
+{% extends "base.html" %}
+
+{% block title %}New Scan - Vulnerability Scanner{% endblock %}
+
+{% block header_title %}New Scan{% endblock %}
+
+{% block content %}
+<div class="scan-container">
+    <div class="row">
+        <!-- Scan Configuration -->
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title">Scan Configuration</h5>
+                </div>
+                <div class="card-body">
+                    <form id="scan-form">
+                        <div class="mb-3">
+                            <label for="url" class="form-label required">Target URL</label>
+                            <input type="url" class="form-control" id="url" name="url" placeholder="https://example.com" required>
+                            <div class="form-text">Enter the complete URL including http:// or https://</div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">LLM Provider</label>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="llm_provider" id="deepseek" value="deepseek" checked>
+                                <label class="form-check-label" for="deepseek">
+                                    DeepSeek (Default)
+                                </label>
+                                <div class="form-text text-muted">Use DeepSeek API with 128K context window</div>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="llm_provider" id="openai" value="openai">
+                                <label class="form-check-label" for="openai">
+                                    OpenAI
+                                </label>
+                                <div class="form-text text-muted">Use OpenAI API with 16K context window</div>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">Scan Type</label>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="scan_type" id="basic_scan" value="basic" checked>
+                                <label class="form-check-label" for="basic_scan">
+                                    Basic Scan
+                                </label>
+                                <div class="form-text text-muted">Scans for XSS and SQL Injection only</div>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="scan_type" id="full_scan" value="full">
+                                <label class="form-check-label" for="full_scan">
+                                    Full Scan
+                                </label>
+                                <div class="form-text text-muted">Scans for all vulnerabilities (XSS, SQL Injection, CSRF, Path Traversal, Open Redirect)</div>
+                            </div>
+                        </div>
+                        
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary" id="start-scan-btn">
+                                <i class="bi bi-shield-check"></i> Start Scan
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            
+            <!-- Scan Information -->
+            <div class="card mt-3 d-none" id="scan-info-card">
+                <div class="card-header">
+                    <h5 class="card-title">Scan Information</h5>
+                </div>
+                <div class="card-body">
+                    <div class="info-item d-flex justify-content-between">
+                        <strong>Target:</strong>
+                        <span id="target-url-display">-</span>
+                    </div>
+                    <div class="info-item d-flex justify-content-between">
+                        <strong>Scan Type:</strong>
+                        <span id="scan-type-display">-</span>
+                    </div>
+                    <div class="info-item d-flex justify-content-between">
+                        <strong>Status:</strong>
+                        <span id="scan-status-display">-</span>
+                    </div>
+                    <div class="info-item d-flex justify-content-between">
+                        <strong>Elapsed Time:</strong>
+                        <span id="elapsed-time-display">-</span>
+                    </div>
+                    <div class="info-item d-flex justify-content-between">
+                        <strong>Vulnerabilities:</strong>
+                        <span id="vuln-count-display">-</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Scan Progress and Output -->
+        <div class="col-md-8">
+            <!-- Progress -->
+            <div class="card" id="scan-progress-card" style="display: none;">
+                <div class="card-header">
+                    <h5 class="card-title">Scan Progress</h5>
+                </div>
+                <div class="card-body">
+                    <div class="progress mb-3" style="height: 20px;">
+                        <div id="scan-progress-bar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
+                    </div>
+                    
+                    <h6 class="mb-2"><i class="bi bi-terminal"></i> Live Output</h6>
+                    <div class="terminal mb-3" id="output-terminal"></div>
+                    
+                    <div class="scan-actions text-center">
+                        <button id="view-report-btn" class="btn btn-success d-none">
+                            <i class="bi bi-file-earmark-text"></i> View Report
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Placeholder before starting scan -->
+            <div class="card" id="scan-placeholder">
+                <div class="card-body text-center py-5">
+                    <div class="scan-placeholder-icon">
+                        <i class="bi bi-shield-plus"></i>
+                    </div>
+                    <h4 class="mt-4">Ready to Scan</h4>
+                    <p class="text-muted">Configure and start a new scan to find vulnerabilities on your target website.</p>
+                    <div class="supported-vulns mt-4">
+                        <span class="badge bg-danger me-2 mb-2">XSS</span>
+                        <span class="badge bg-danger me-2 mb-2">SQL Injection</span>
+                        <span class="badge bg-warning text-dark me-2 mb-2">CSRF</span>
+                        <span class="badge bg-warning text-dark me-2 mb-2">Path Traversal</span>
+                        <span class="badge bg-info text-dark me-2 mb-2">Open Redirect</span>
+                        <span class="badge bg-info text-dark me-2 mb-2">Security Headers</span>
+                        <span class="badge bg-info text-dark me-2 mb-2">SSL/TLS Issues</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Scan Results -->
+            <div class="card mt-3 d-none" id="scan-results-card">
+                <div class="card-header">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h5 class="card-title mb-0">Scan Results</h5>
+                        <div class="card-actions">
+                            <button class="btn btn-sm btn-outline-primary" id="download-report-btn">
+                                <i class="bi bi-download"></i> Download Report
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <ul class="nav nav-tabs" id="resultTabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="summary-tab" data-bs-toggle="tab" data-bs-target="#summary" type="button" role="tab">
+                                Summary
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="details-tab" data-bs-toggle="tab" data-bs-target="#details" type="button" role="tab">
+                                Detailed Report
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="raw-tab" data-bs-toggle="tab" data-bs-target="#raw" type="button" role="tab">
+                                Raw Output
+                            </button>
+                        </li>
+                    </ul>
+                    <div class="tab-content mt-3">
+                        <div class="tab-pane fade show active" id="summary" role="tabpanel">
+                            <div class="results-loading text-center py-5 d-none">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <p class="mt-3">Processing scan results...</p>
+                            </div>
+                            <div id="summary-content" class="vulnerability-summary"></div>
+                        </div>
+                        <div class="tab-pane fade" id="details" role="tabpanel">
+                            <div id="details-content" class="vulnerability-details"></div>
+                        </div>
+                        <div class="tab-pane fade" id="raw" role="tabpanel">
+                            <pre id="raw-content" class="raw-output"></pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Elements
+    const scanForm = document.getElementById('scan-form');
+    const startScanBtn = document.getElementById('start-scan-btn');
+    const scanProgressCard = document.getElementById('scan-progress-card');
+    const scanPlaceholder = document.getElementById('scan-placeholder');
+    const scanInfoCard = document.getElementById('scan-info-card');
+    const scanResultsCard = document.getElementById('scan-results-card');
+    const outputTerminal = document.getElementById('output-terminal');
+    const progressBar = document.getElementById('scan-progress-bar');
+    const viewReportBtn = document.getElementById('view-report-btn');
+    const downloadReportBtn = document.getElementById('download-report-btn');
+    
+    // Info display elements
+    const targetUrlDisplay = document.getElementById('target-url-display');
+    const scanTypeDisplay = document.getElementById('scan-type-display');
+    const scanStatusDisplay = document.getElementById('scan-status-display');
+    const elapsedTimeDisplay = document.getElementById('elapsed-time-display');
+    const vulnCountDisplay = document.getElementById('vuln-count-display');
+    
+    // Results elements
+    const summaryContent = document.getElementById('summary-content');
+    const detailsContent = document.getElementById('details-content');
+    const rawContent = document.getElementById('raw-content');
+    
+    // Global variables
+    let currentScanId = null;
+    let statusCheckTimer = null;
+    let eventSource = null;
+    
+    // Start a new scan
+    scanForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        const url = document.getElementById('url').value;
+        const llmProvider = document.querySelector('input[name="llm_provider"]:checked').value;
+        const scanType = document.querySelector('input[name="scan_type"]:checked').value;
+        
+        // Reset UI
+        outputTerminal.innerHTML = '';
+        progressBar.style.width = '0%';
+        progressBar.textContent = '0%';
+        progressBar.setAttribute('aria-valuenow', '0');
+        viewReportBtn.classList.add('d-none');
+        scanResultsCard.classList.add('d-none');
+        
+        // Show progress card, hide placeholder
+        scanProgressCard.style.display = 'block';
+        scanPlaceholder.style.display = 'none';
+        scanInfoCard.classList.remove('d-none');
+        
+        // Update scan info
+        targetUrlDisplay.textContent = url;
+        scanTypeDisplay.textContent = scanType === 'full' ? 'Full Scan' : 'Basic Scan';
+        scanStatusDisplay.textContent = 'Starting...';
+        elapsedTimeDisplay.textContent = '00:00:00';
+        vulnCountDisplay.textContent = '-';
+        
+        // Disable start button
+        startScanBtn.disabled = true;
+        startScanBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Scanning...';
+        
+        // Start scan
+        fetch('/api/scan', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: new URLSearchParams({
+                'url': url,
+                'llm_provider': llmProvider,
+                'scan_type': scanType
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.scan_id) {
+                currentScanId = data.scan_id;
+                outputTerminal.innerHTML += `Starting scan (ID: ${currentScanId}) for ${url}...\n`;
+                scanStatusDisplay.textContent = 'Running';
+                
+                // Start polling for status updates
+                startStatusCheck();
+                
+                // Start event source for live updates
+                connectToEventStream();
+            }
+        })
+        .catch(error => {
+            console.error('Error starting scan:', error);
+            outputTerminal.innerHTML += `\nError starting scan: ${error}\n`;
+            enableScanButton();
+            scanStatusDisplay.textContent = 'Error';
+        });
+    });
+    
+    // Polling for status updates
+    function startStatusCheck() {
+        if (statusCheckTimer) {
+            clearInterval(statusCheckTimer);
+        }
+        
+        statusCheckTimer = setInterval(updateScanStatus, 2000);
+    }
+    
+    // Update scan status
+    function updateScanStatus() {
+        if (!currentScanId) return;
+        
+        fetch(`/api/scan/${currentScanId}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    console.error(data.error);
+                    stopStatusCheck();
+                    return;
+                }
+                
+                // Update progress bar
+                progressBar.style.width = `${data.progress}%`;
+                progressBar.textContent = `${data.progress}%`;
+                progressBar.setAttribute('aria-valuenow', data.progress);
+                
+                // Update elapsed time
+                elapsedTimeDisplay.textContent = data.elapsed_time;
+                
+                // Update status
+                scanStatusDisplay.textContent = data.status.charAt(0).toUpperCase() + data.status.slice(1);
+                
+                // If completed or error, stop polling
+                if (data.status === 'completed' || data.status === 'error') {
+                    stopStatusCheck();
+                    onScanCompleted(data);
+                }
+            })
+            .catch(error => {
+                console.error('Error updating scan status:', error);
+            });
+    }
+    
+    // On scan completed
+    function onScanCompleted(data) {
+        // Update UI
+        enableScanButton();
+        viewReportBtn.classList.remove('d-none');
+        
+        if (data.status === 'completed') {
+            // Stop progress bar animation
+            progressBar.classList.remove('progress-bar-animated');
+            
+            // Fetch results
+            fetchScanResults();
+        }
+    }
+    
+    // Connect to event stream for live updates
+    function connectToEventStream() {
+        // Close existing connection if any
+        if (eventSource) {
+            eventSource.close();
+        }
+        
+        // Connect to SSE
+        eventSource = new EventSource('/api/stream');
+        
+        eventSource.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            
+            // Only process messages for current scan
+            if (data.scan_id === currentScanId) {
+                outputTerminal.innerHTML += data.text;
+                // Auto-scroll to bottom
+                outputTerminal.scrollTop = outputTerminal.scrollHeight;
+                
+                // Try to extract vulnerability count from output
+                const vulnMatch = data.text.match(/vulnerabilities found: (\d+)/i);
+                if (vulnMatch && vulnMatch[1]) {
+                    vulnCountDisplay.textContent = vulnMatch[1];
+                }
+            }
+        };
+        
+        eventSource.onerror = function(error) {
+            console.error('EventSource error:', error);
+        };
+    }
+    
+    // Stop status check
+    function stopStatusCheck() {
+        if (statusCheckTimer) {
+            clearInterval(statusCheckTimer);
+            statusCheckTimer = null;
+        }
+    }
+    
+    // Enable scan button
+    function enableScanButton() {
+        startScanBtn.disabled = false;
+        startScanBtn.innerHTML = '<i class="bi bi-shield-check"></i> Start Scan';
+    }
+    
+    // Fetch scan results
+    function fetchScanResults() {
+        if (!currentScanId) return;
+        
+        fetch(`/api/scan/${currentScanId}/result`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'completed' && data.result) {
+                    displayScanResults(data.result);
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching scan results:', error);
+            });
+    }
+    
+    // Display scan results
+    function displayScanResults(result) {
+        // For text results
+        if (typeof result === 'string') {
+            // Format summary content
+            let summaryHtml = '';
+            
+            // Try to extract summary information
+            const titleMatch = result.match(/# Comprehensive Vulnerability Assessment Report/);
+            if (titleMatch) {
+                // It's a markdown-like format, try to create a structured summary
+                
+                // Extract executive summary
+                const execSummaryMatch = result.match(/## Executive Summary\s*([\s\S]*?)(?=##|$)/);
+                if (execSummaryMatch && execSummaryMatch[1]) {
+                    const execSummary = execSummaryMatch[1].trim();
+                    summaryHtml += '<div class="summary-section mb-4">';
+                    summaryHtml += '<h3>Executive Summary</h3>';
+                    summaryHtml += `<p>${execSummary.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br>')}</p>`;
+                    summaryHtml += '</div>';
+                }
+                
+                // Extract vulnerability summary
+                const vulnSummaryMatch = result.match(/## Summary of Vulnerabilities\s*([\s\S]*?)(?=##|$)/);
+                if (vulnSummaryMatch && vulnSummaryMatch[1]) {
+                    const vulnSummary = vulnSummaryMatch[1].trim();
+                    summaryHtml += '<div class="summary-section mb-4">';
+                    summaryHtml += '<h3>Vulnerability Summary</h3>';
+                    
+                    // Try to extract different risk levels
+                    const criticalMatch = vulnSummary.match(/Critical: (\d+)/i);
+                    const highMatch = vulnSummary.match(/High: (\d+)/i);
+                    const mediumMatch = vulnSummary.match(/Medium: (\d+)/i);
+                    const lowMatch = vulnSummary.match(/Low: (\d+)/i);
+                    
+                    if (criticalMatch || highMatch || mediumMatch || lowMatch) {
+                        summaryHtml += '<div class="risk-summary d-flex flex-wrap">';
+                        
+                        if (criticalMatch) {
+                            summaryHtml += `
+                                <div class="risk-box risk-critical m-2">
+                                    <div class="risk-count">${criticalMatch[1]}</div>
+                                    <div class="risk-label">Critical</div>
+                                </div>
+                            `;
+                        }
+                        
+                        if (highMatch) {
+                            summaryHtml += `
+                                <div class="risk-box risk-high m-2">
+                                    <div class="risk-count">${highMatch[1]}</div>
+                                    <div class="risk-label">High</div>
+                                </div>
+                            `;
+                        }
+                        
+                        if (mediumMatch) {
+                            summaryHtml += `
+                                <div class="risk-box risk-medium m-2">
+                                    <div class="risk-count">${mediumMatch[1]}</div>
+                                    <div class="risk-label">Medium</div>
+                                </div>
+                            `;
+                        }
+                        
+                        if (lowMatch) {
+                            summaryHtml += `
+                                <div class="risk-box risk-low m-2">
+                                    <div class="risk-count">${lowMatch[1]}</div>
+                                    <div class="risk-label">Low</div>
+                                </div>
+                            `;
+                        }
+                        
+                        summaryHtml += '</div>';
+                    } else {
+                        summaryHtml += `<p>${vulnSummary.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br>')}</p>`;
+                    }
+                    
+                    summaryHtml += '</div>';
+                }
+                
+                // Format full details
+                let detailsHtml = parseMarkdownToHtml(result);
+                detailsContent.innerHTML = detailsHtml;
+            } else {
+                // Not in markdown format, just add as is
+                summaryHtml = `<pre>${result}</pre>`;
+                detailsContent.innerHTML = summaryHtml;
+            }
+            
+            summaryContent.innerHTML = summaryHtml;
+            rawContent.textContent = result;
+        } else {
+            // For JSON results
+            summaryContent.innerHTML = '<pre>' + JSON.stringify(result, null, 2) + '</pre>';
+            detailsContent.innerHTML = '<pre>' + JSON.stringify(result, null, 2) + '</pre>';
+            rawContent.textContent = JSON.stringify(result, null, 2);
+        }
+        
+        // Show results card
+        scanResultsCard.classList.remove('d-none');
+    }
+    
+    // View report button click
+    viewReportBtn.addEventListener('click', function() {
+        scanResultsCard.classList.remove('d-none');
+        scanResultsCard.scrollIntoView({ behavior: 'smooth' });
+    });
+    
+    // Download report
+    downloadReportBtn.addEventListener('click', function() {
+        if (!currentScanId) return;
+        
+        fetch(`/api/scan/${currentScanId}/result`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'completed' && data.result) {
+                    // Create a blob and download
+                    const blob = new Blob([typeof data.result === 'string' ? data.result : JSON.stringify(data.result, null, 2)], { type: 'text/plain' });
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.style.display = 'none';
+                    a.href = url;
+                    a.download = `vulnerability_report_${new Date().toISOString().split('T')[0]}.txt`;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                }
+            })
+            .catch(error => {
+                console.error('Error downloading report:', error);
+            });
+    });
+    
+    // Helper function to parse markdown-like format to HTML
+    function parseMarkdownToHtml(markdown) {
+        let html = '';
+        const lines = markdown.split('\n');
+        
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            
+            if (line.startsWith('# ')) {
+                html += `<h1>${line.substring(2)}</h1>`;
+            } else if (line.startsWith('## ')) {
+                html += `<h2>${line.substring(3)}</h2>`;
+            } else if (line.startsWith('### ')) {
+                html += `<h3>${line.substring(4)}</h3>`;
+            } else if (line.startsWith('- ')) {
+                html += '<ul>';
+                html += `<li>${line.substring(2)}</li>`;
+                
+                // Look ahead for more list items
+                let j = i + 1;
+                while (j < lines.length && lines[j].startsWith('- ')) {
+                    html += `<li>${lines[j].substring(2)}</li>`;
+                    i = j;
+                    j++;
+                }
+                
+                html += '</ul>';
+            } else if (line.trim() === '') {
+                html += '<br>';
+            } else if (line.includes('Critical:') || line.includes('CRITICAL')) {
+                html += `<p><span class="badge bg-danger">CRITICAL</span> ${line}</p>`;
+            } else if (line.includes('High:') || line.includes('HIGH')) {
+                html += `<p><span class="badge bg-warning text-dark">HIGH</span> ${line}</p>`;
+            } else if (line.includes('Medium:') || line.includes('MEDIUM')) {
+                html += `<p><span class="badge bg-info text-dark">MEDIUM</span> ${line}</p>`;
+            } else if (line.includes('Low:') || line.includes('LOW')) {
+                html += `<p><span class="badge bg-success">LOW</span> ${line}</p>`;
+            } else {
+                html += `<p>${line}</p>`;
+            }
+        }
+        
+        return html;
+    }
+});
+</script>
+{% endblock %} 

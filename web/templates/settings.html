@@ -1,0 +1,347 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - Vulnerability Scanner{% endblock %}
+
+{% block header_title %}Settings{% endblock %}
+
+{% block content %}
+<div class="settings-container">
+    <div class="row">
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title">Settings Navigation</h5>
+                </div>
+                <div class="card-body p-0">
+                    <div class="list-group list-group-flush settings-nav">
+                        <a href="#api-settings" class="list-group-item list-group-item-action active" data-bs-toggle="list">
+                            <i class="bi bi-key"></i> API Configuration
+                        </a>
+                        <a href="#scan-settings" class="list-group-item list-group-item-action" data-bs-toggle="list">
+                            <i class="bi bi-gear"></i> Scan Settings
+                        </a>
+                        <a href="#report-settings" class="list-group-item list-group-item-action" data-bs-toggle="list">
+                            <i class="bi bi-file-earmark-text"></i> Report Settings
+                        </a>
+                        <a href="#system-info" class="list-group-item list-group-item-action" data-bs-toggle="list">
+                            <i class="bi bi-info-circle"></i> System Information
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-8">
+            <div class="tab-content">
+                <!-- API Configuration -->
+                <div class="tab-pane fade show active" id="api-settings">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="card-title">API Configuration</h5>
+                        </div>
+                        <div class="card-body">
+                            <form id="api-settings-form">
+                                <div class="mb-3">
+                                    <label for="openai_api_key" class="form-label">OpenAI API Key</label>
+                                    <div class="input-group">
+                                        <input type="password" class="form-control" id="openai_api_key" placeholder="Enter your OpenAI API key">
+                                        <button class="btn btn-outline-secondary" type="button" id="toggle-openai-key">
+                                            <i class="bi bi-eye"></i>
+                                        </button>
+                                    </div>
+                                    <div class="form-text">Required if you want to use OpenAI as the LLM provider</div>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="deepseek_api_key" class="form-label">DeepSeek API Key</label>
+                                    <div class="input-group">
+                                        <input type="password" class="form-control" id="deepseek_api_key" placeholder="Enter your DeepSeek API key">
+                                        <button class="btn btn-outline-secondary" type="button" id="toggle-deepseek-key">
+                                            <i class="bi bi-eye"></i>
+                                        </button>
+                                    </div>
+                                    <div class="form-text">Required if you want to use DeepSeek as the LLM provider (default)</div>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="deepseek_api_base" class="form-label">DeepSeek API Base URL</label>
+                                    <input type="text" class="form-control" id="deepseek_api_base" placeholder="Enter the DeepSeek API base URL">
+                                    <div class="form-text">The base URL for DeepSeek API</div>
+                                </div>
+                                
+                                <div class="d-grid">
+                                    <button type="submit" class="btn btn-primary" id="save-api-settings">
+                                        <i class="bi bi-save"></i> Save API Settings
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Scan Settings -->
+                <div class="tab-pane fade" id="scan-settings">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="card-title">Scan Settings</h5>
+                        </div>
+                        <div class="card-body">
+                            <form id="scan-settings-form">
+                                <div class="mb-3">
+                                    <label for="default_llm" class="form-label">Default LLM Provider</label>
+                                    <select class="form-select" id="default_llm">
+                                        <option value="deepseek" selected>DeepSeek (128K context window)</option>
+                                        <option value="openai">OpenAI (16K context window)</option>
+                                    </select>
+                                    <div class="form-text">The default LLM provider to use for scanning</div>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="default_scan_type" class="form-label">Default Scan Type</label>
+                                    <select class="form-select" id="default_scan_type">
+                                        <option value="basic" selected>Basic Scan (Faster, only XSS and SQL Injection)</option>
+                                        <option value="full">Full Scan (All vulnerabilities)</option>
+                                    </select>
+                                    <div class="form-text">The default scan type to use</div>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label class="form-label">Vulnerability Types to Scan</label>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="vuln_xss" checked>
+                                        <label class="form-check-label" for="vuln_xss">
+                                            Cross-Site Scripting (XSS)
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="vuln_sqli" checked>
+                                        <label class="form-check-label" for="vuln_sqli">
+                                            SQL Injection
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="vuln_csrf" checked>
+                                        <label class="form-check-label" for="vuln_csrf">
+                                            Cross-Site Request Forgery (CSRF)
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="vuln_path" checked>
+                                        <label class="form-check-label" for="vuln_path">
+                                            Path Traversal
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="vuln_open_redirect" checked>
+                                        <label class="form-check-label" for="vuln_open_redirect">
+                                            Open Redirect
+                                        </label>
+                                    </div>
+                                </div>
+                                
+                                <div class="d-grid">
+                                    <button type="submit" class="btn btn-primary" id="save-scan-settings">
+                                        <i class="bi bi-save"></i> Save Scan Settings
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Report Settings -->
+                <div class="tab-pane fade" id="report-settings">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="card-title">Report Settings</h5>
+                        </div>
+                        <div class="card-body">
+                            <form id="report-settings-form">
+                                <div class="mb-3">
+                                    <label for="report_format" class="form-label">Report Format</label>
+                                    <select class="form-select" id="report_format">
+                                        <option value="both" selected>Both (JSON and Text)</option>
+                                        <option value="json">JSON Only</option>
+                                        <option value="text">Text Only</option>
+                                    </select>
+                                    <div class="form-text">The format to save scan reports in</div>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="report_dir" class="form-label">Report Directory</label>
+                                    <input type="text" class="form-control" id="report_dir" placeholder="Directory for saving reports" value="./reports">
+                                    <div class="form-text">Directory to save scan reports in (relative to application directory)</div>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" id="auto_save_reports" checked>
+                                        <label class="form-check-label" for="auto_save_reports">
+                                            Automatically save reports
+                                        </label>
+                                    </div>
+                                    <div class="form-text">Whether to automatically save scan reports</div>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" id="include_recommendations" checked>
+                                        <label class="form-check-label" for="include_recommendations">
+                                            Include remediation recommendations
+                                        </label>
+                                    </div>
+                                    <div class="form-text">Whether to include remediation recommendations in reports</div>
+                                </div>
+                                
+                                <div class="d-grid">
+                                    <button type="submit" class="btn btn-primary" id="save-report-settings">
+                                        <i class="bi bi-save"></i> Save Report Settings
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- System Information -->
+                <div class="tab-pane fade" id="system-info">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="card-title">System Information</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table">
+                                    <tbody>
+                                        <tr>
+                                            <th scope="row">Application Version:</th>
+                                            <td>1.0.0</td>
+                                        </tr>
+                                        <tr>
+                                            <th scope="row">Python Version:</th>
+                                            <td id="python-version">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th scope="row">Operating System:</th>
+                                            <td id="os-info">-</td>
+                                        </tr>
+                                        <tr>
+                                            <th scope="row">CrewAI Version:</th>
+                                            <td>Latest</td>
+                                        </tr>
+                                        <tr>
+                                            <th scope="row">Number of Agents:</th>
+                                            <td>4 (Web Crawler, Information Gatherer, Endpoint Scanner, Security Analyst)</td>
+                                        </tr>
+                                        <tr>
+                                            <th scope="row">Default LLM:</th>
+                                            <td id="default-llm-info">DeepSeek</td>
+                                        </tr>
+                                        <tr>
+                                            <th scope="row">Default Scan Type:</th>
+                                            <td id="default-scan-type-info">Basic</td>
+                                        </tr>
+                                        <tr>
+                                            <th scope="row">API Configuration:</th>
+                                            <td id="api-status">-</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            
+                            <div class="d-grid mt-3">
+                                <button type="button" class="btn btn-outline-primary" id="refresh-system-info">
+                                    <i class="bi bi-arrow-clockwise"></i> Refresh System Information
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Toggle password visibility
+    function setupPasswordToggle(buttonId, inputId) {
+        document.getElementById(buttonId).addEventListener('click', function() {
+            const input = document.getElementById(inputId);
+            const icon = this.querySelector('i');
+            
+            if (input.type === 'password') {
+                input.type = 'text';
+                icon.classList.remove('bi-eye');
+                icon.classList.add('bi-eye-slash');
+            } else {
+                input.type = 'password';
+                icon.classList.remove('bi-eye-slash');
+                icon.classList.add('bi-eye');
+            }
+        });
+    }
+    
+    // Set up password toggles
+    setupPasswordToggle('toggle-openai-key', 'openai_api_key');
+    setupPasswordToggle('toggle-deepseek-key', 'deepseek_api_key');
+    
+    // API Settings form
+    document.getElementById('api-settings-form').addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        // Get values
+        const openaiApiKey = document.getElementById('openai_api_key').value;
+        const deepseekApiKey = document.getElementById('deepseek_api_key').value;
+        const deepseekApiBase = document.getElementById('deepseek_api_base').value;
+        
+        // Demo - in a real app, this would save to server
+        alert('API settings saved! (Demo only - no actual change)');
+    });
+    
+    // Scan Settings form
+    document.getElementById('scan-settings-form').addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        // Get values
+        const defaultLlm = document.getElementById('default_llm').value;
+        const defaultScanType = document.getElementById('default_scan_type').value;
+        
+        // Demo - in a real app, this would save to server
+        alert('Scan settings saved! (Demo only - no actual change)');
+        
+        // Update system info
+        document.getElementById('default-llm-info').textContent = defaultLlm === 'deepseek' ? 'DeepSeek' : 'OpenAI';
+        document.getElementById('default-scan-type-info').textContent = defaultScanType === 'basic' ? 'Basic' : 'Full';
+    });
+    
+    // Report Settings form
+    document.getElementById('report-settings-form').addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        // Demo - in a real app, this would save to server
+        alert('Report settings saved! (Demo only - no actual change)');
+    });
+    
+    // Refresh system info
+    document.getElementById('refresh-system-info').addEventListener('click', function() {
+        // In a real app, this would fetch from server
+        document.getElementById('python-version').textContent = '3.9.x';
+        document.getElementById('os-info').textContent = navigator.platform;
+        
+        // Check API status
+        document.getElementById('api-status').innerHTML = '<span class="badge bg-success">Configured</span>';
+        
+        // Show notification
+        alert('System information refreshed!');
+    });
+    
+    // Initialize
+    document.getElementById('python-version').textContent = '3.9.x';
+    document.getElementById('os-info').textContent = navigator.platform;
+    document.getElementById('api-status').innerHTML = '<span class="badge bg-success">Configured</span>';
+});
+</script>
+{% endblock %} 

@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Vulnerability Scanner{% endblock %}</title>
+    <!-- CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.3/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <!-- Sidebar Navigation -->
+    <div class="d-flex">
+        <div class="sidebar">
+            <div class="logo-container">
+                <img src="{{ url_for('static', filename='img/logo.png') }}" alt="Logo" class="sidebar-logo">
+                <h5 class="sidebar-title">VulnScanner</h5>
+            </div>
+            <div class="sidebar-divider"></div>
+            <nav class="sidebar-nav">
+                <a href="{{ url_for('index') }}" class="sidebar-link {% if request.path == url_for('index') %}active{% endif %}">
+                    <i class="bi bi-house-door"></i>
+                    <span>Dashboard</span>
+                </a>
+                <a href="{{ url_for('scan_page') }}" class="sidebar-link {% if request.path == url_for('scan_page') %}active{% endif %}">
+                    <i class="bi bi-shield-check"></i>
+                    <span>New Scan</span>
+                </a>
+                <a href="{{ url_for('history_page') }}" class="sidebar-link {% if request.path == url_for('history_page') %}active{% endif %}">
+                    <i class="bi bi-clock-history"></i>
+                    <span>History</span>
+                </a>
+                <a href="{{ url_for('settings_page') }}" class="sidebar-link {% if request.path == url_for('settings_page') %}active{% endif %}">
+                    <i class="bi bi-gear"></i>
+                    <span>Settings</span>
+                </a>
+            </nav>
+            <div class="sidebar-divider"></div>
+            <div class="sidebar-footer">
+                <p class="version">Version 1.0.0</p>
+                <p class="created-by">Powered by CrewAI</p>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Header -->
+            <header class="main-header">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div class="header-title">
+                        <h1>{% block header_title %}Dashboard{% endblock %}</h1>
+                    </div>
+                    <div class="header-actions">
+                        <button class="btn btn-outline-primary" type="button" id="darkModeToggle">
+                            <i class="bi bi-moon"></i>
+                        </button>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Page Content -->
+            <div class="content-wrapper">
+                {% block content %}{% endblock %}
+            </div>
+
+            <!-- Footer -->
+            <footer class="main-footer">
+                <div class="d-flex justify-content-between align-items-center">
+                    <p>&copy; 2024 Vulnerability Scanner. All rights reserved.</p>
+                    <p>Created with <i class="bi bi-heart-fill text-danger"></i> for Security</p>
+                </div>
+            </footer>
+        </div>
+    </div>
+
+    <!-- JavaScript -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html> 

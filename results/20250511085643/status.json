@@ -1,8 +1,0 @@
-{
-  "status": "error",
-  "progress": 10,
-  "start_time": "2025-05-11 08:56:43",
-  "agent_status": {},
-  "error": "name 'perform_simple_scan' is not defined",
-  "end_time": "2025-05-11 08:56:43"
-}

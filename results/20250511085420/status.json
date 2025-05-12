@@ -1,8 +1,0 @@
-{
-  "status": "error",
-  "progress": 5,
-  "start_time": "2025-05-11 08:54:20",
-  "agent_status": {},
-  "error": "name 'AgentMessageHandler' is not defined",
-  "end_time": "2025-05-11 08:54:20"
-}
