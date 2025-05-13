@@ -8,6 +8,7 @@ import tempfile
 import hashlib
 import inspect
 import traceback
+import sqlite3
 
 # Thêm logging nâng cao
 import logging
@@ -54,6 +55,56 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.insert(0, parent_dir)
 
+# SQLite Database setup
+DB_NAME = "vuln_scanner_history.db"
+
+def init_db():
+    """Khởi tạo cơ sở dữ liệu SQLite và bảng scans nếu chưa tồn tại."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS scans (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            target_url TEXT NOT NULL,
+            scan_type TEXT,
+            scan_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            status TEXT, 
+            report_json_path TEXT,
+            report_txt_path TEXT,
+            web_json_path TEXT 
+        )
+    """)
+    conn.commit()
+    conn.close()
+    logger.info(f"Database {DB_NAME} initialized.")
+
+def log_scan_start(target_url, scan_type):
+    """Ghi lại thông tin khi một lượt quét bắt đầu và trả về ID của bản ghi."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO scans (target_url, scan_type, status)
+        VALUES (?, ?, ?)
+    """, (target_url, scan_type, "Running"))
+    scan_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    logger.info(f"Scan started for {target_url} (Type: {scan_type}). DB ID: {scan_id}")
+    return scan_id
+
+def log_scan_end(scan_id, status, report_json_path=None, report_txt_path=None, web_json_path=None):
+    """Cập nhật thông tin khi một lượt quét kết thúc."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE scans
+        SET status = ?, report_json_path = ?, report_txt_path = ?, web_json_path = ?
+        WHERE id = ?
+    """, (status, report_json_path, report_txt_path, web_json_path, scan_id))
+    conn.commit()
+    conn.close()
+    logger.info(f"Scan ID {scan_id} updated. Status: {status}")
+
 # Safe file opening to handle encoding errors
 def safe_open_file(file_path, mode='r', encoding='utf-8'):
     """Open file safely with encoding error handling"""
@@ -63,7 +114,7 @@ def safe_open_file(file_path, mode='r', encoding='utf-8'):
         # Try with Latin-1 encoding if UTF-8 doesn't work
         return open(file_path, mode=mode, encoding='latin-1')
 
-from crewai import Crew, Process, LLM, Task
+from crewai import Crew, Process, LLM, Task, Agent
 from crewai.memory import LongTermMemory, ShortTermMemory, EntityMemory
 from dotenv import load_dotenv
 import json
@@ -74,6 +125,7 @@ import argparse
 from agents.crawler_agent import create_crawler_agent, create_endpoint_scanner_agent
 from agents.information_gatherer import create_information_gatherer_agent
 from agents.security_analyst import create_security_analyst_agent
+from agents.report_formatter_agent import create_json_report_formatter_agent
 
 from tasks.crawling_tasks import (
     website_crawling_task,
@@ -81,6 +133,8 @@ from tasks.crawling_tasks import (
     dynamic_content_analysis_task,
     endpoint_categorization_task
 )
+
+from tasks.report_formatting_tasks import create_json_report_formatting_task
 
 from tasks.scanning_tasks import (
     xss_scanning_task,
@@ -127,17 +181,26 @@ load_dotenv()
 
 def save_report_to_file(report, target_url, filename="scan_report.json"):
     """Save scan report to file"""
+    json_filepath = None
+    txt_filepath = None
     try:
         # Normalize URL for use in filename
         safe_url = target_url.replace("://", "_").replace(".", "_").replace("/", "_")
+        
+        # Ensure reports directory exists
+        reports_dir = "scan_reports"
+        os.makedirs(reports_dir, exist_ok=True)
+        
         json_filename = f"report_{safe_url}_{filename}"
+        json_filepath = os.path.join(reports_dir, json_filename)
         
         # Save original JSON report
-        with open(json_filename, 'w', encoding='utf-8') as f:
+        with open(json_filepath, 'w', encoding='utf-8') as f:
             json.dump(report, f, indent=4, ensure_ascii=False)
         
         # Save formatted text report
         txt_filename = json_filename.replace('.json', '.txt')
+        txt_filepath = os.path.join(reports_dir, txt_filename)
         
         # Check if the report is already well-formatted
         if isinstance(report, dict) and "report" in report and isinstance(report["report"], str) and "# Comprehensive Vulnerability Assessment Report" in report["report"]:
@@ -145,14 +208,18 @@ def save_report_to_file(report, target_url, filename="scan_report.json"):
         else:
             formatted_report = format_vulnerability_report(report)
             
-        with open(txt_filename, 'w', encoding='utf-8') as f:
+        with open(txt_filepath, 'w', encoding='utf-8') as f:
             f.write(formatted_report)
         
-        return f"Report saved to file: {json_filename} (JSON) and {txt_filename} (Text)"
+        success_message = f"Report saved to file: {json_filepath} (JSON) and {txt_filepath} (Text)"
+        logger.info(success_message)
+        return success_message, json_filepath, txt_filepath
     except Exception as e:
-        return f"Error saving report: {str(e)}"
+        error_message = f"Error saving report: {str(e)}"
+        logger.error(error_message)
+        return error_message, None, None
 
-def scan_website(target_url=None, use_deepseek=True, scan_type="basic"):
+def scan_website(target_url=None, use_deepseek=True, scan_type="basic", current_scan_id=None):
     """
     Scan target website and return vulnerability assessment results
     
@@ -160,14 +227,19 @@ def scan_website(target_url=None, use_deepseek=True, scan_type="basic"):
         target_url (str): Target website URL
         use_deepseek (bool): Whether to use DeepSeek LLM
         scan_type (str): Scan type - "basic" or "full"
+        current_scan_id (int): The ID of the current scan in the database
         
     Returns:
         str: Vulnerability assessment results
+        str: Path to the main JSON report file
+        str: Path to the main TXT report file
+        str: Path to the web-friendly JSON report file
     """
     if not target_url or target_url.strip() == "":
         error_message = "Error: URL not provided. Please enter a URL to scan."
         print(f"\n{error_message}")
-        return error_message
+        # Trả về 4 giá trị, các đường dẫn file là None
+        return error_message, None, None, None
     
     # Normalize URL if needed
     if not target_url.startswith(('http://', 'https://')):
@@ -208,7 +280,7 @@ def scan_website(target_url=None, use_deepseek=True, scan_type="basic"):
             
             if not openai_api_key:
                 print("Missing OpenAI API key. Please check your .env file")
-                return "Error: Missing OpenAI API key. Please check your .env file"
+                return "Error: Missing OpenAI API key. Please check your .env file", None, None, None
             
             # Set global environment variable
             os.environ["OPENAI_API_KEY"] = openai_api_key
@@ -225,7 +297,7 @@ def scan_website(target_url=None, use_deepseek=True, scan_type="basic"):
             print("Using OpenAI API with 16K context window")
     except Exception as e:
         print(f"Error initializing LLM: {str(e)}")
-        return f"Error initializing LLM: {str(e)}"
+        return f"Error initializing LLM: {str(e)}", None, None, None
     
     try:
         # Set global environment variables to ensure all tools can use the target URL
@@ -604,27 +676,93 @@ def scan_website(target_url=None, use_deepseek=True, scan_type="basic"):
                 "report": result_content
             }
             
-            save_message = save_report_to_file(
+            save_message, json_report_path, txt_report_path = save_report_to_file(
                 report_data,
                 target_url,
                 "vulnerability_report.json"
             )
             print(f"\n{save_message}")
             
-            return result_content
+            # LLM đã được khởi tạo ở trên, chúng ta sẽ dùng lại nó
+            report_formatter_agent = create_json_report_formatter_agent(llm)
+            
+            # Đảm bảo result_content là một chuỗi để đưa vào prompt
+            if not isinstance(result_content, str):
+                report_input_for_formatter = json.dumps(result_content, indent=2) if isinstance(result_content, dict) else str(result_content)
+            else:
+                report_input_for_formatter = result_content
+
+            formatting_task = create_json_report_formatting_task(report_formatter_agent, report_input_for_formatter)
+            
+            formatter_crew = Crew(
+                agents=[report_formatter_agent],
+                tasks=[formatting_task],
+                verbose=1 # Có thể đặt là 2 để debug chi tiết hơn
+            )
+            
+            logger.info("Starting JSON report formatting...")
+            web_json_output_str = formatter_crew.kickoff()
+            
+            web_json_path = None
+            if web_json_output_str and isinstance(web_json_output_str, str):
+                try:
+                    # Validate if it's proper JSON and pretty print it
+                    parsed_json = json.loads(web_json_output_str)
+                    web_json_content_to_save = json.dumps(parsed_json, indent=4, ensure_ascii=False)
+
+                    safe_url = target_url.replace("://", "_").replace(".", "_").replace("/", "_")
+                    timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+                    web_json_filename = f"web_report_{safe_url}_{timestamp}.json"
+                    reports_dir = "scan_reports" # Đảm bảo thư mục này tồn tại (đã có trong save_report_to_file)
+                    web_json_path = os.path.join(reports_dir, web_json_filename)
+                    
+                    with open(web_json_path, 'w', encoding='utf-8') as f:
+                        f.write(web_json_content_to_save)
+                    logger.info(f"Web-friendly JSON report saved to: {web_json_path}")
+                except json.JSONDecodeError as je:
+                    logger.error(f"Failed to parse JSON from formatter agent: {je}")
+                    logger.error(f"Formatter agent output was: {web_json_output_str}")
+                except Exception as e:
+                    logger.error(f"Error saving web-friendly JSON report: {str(e)}")
+            else:
+                logger.warning("JSON report formatter agent did not return a valid string.")
+
+            # Cập nhật DB với đường dẫn web_json_path
+            if current_scan_id and web_json_path:
+                 # Lấy status và các đường dẫn khác để không ghi đè chúng bằng None
+                conn = sqlite3.connect(DB_NAME)
+                cursor = conn.cursor()
+                cursor.execute("SELECT status, report_json_path, report_txt_path FROM scans WHERE id = ?", (current_scan_id,))
+                existing_data = cursor.fetchone()
+                conn.close()
+
+                if existing_data:
+                    current_status, main_json_path, main_txt_path = existing_data
+                    log_scan_end(current_scan_id, current_status, main_json_path, main_txt_path, web_json_path)
+                else: # Fallback if somehow scan_id is not found (should not happen)
+                    log_scan_end(current_scan_id, "Completed_With_Web_Report", json_report_path, txt_report_path, web_json_path)
+
+            # Trả về nội dung kết quả và đường dẫn file để lưu vào DB
+            return result_content, json_report_path, txt_report_path, web_json_path
         except Exception as e:
-            print(f"Error running crew: {str(e)}")
+            error_message = f"Error running crew: {str(e)}"
+            print(error_message)
+            logger.error(error_message)
             
             # Try to recover from last saved results if available
             last_results = load_interim_results("final_summary", "security_analyst", target_url)
             if last_results:
                 print("Recovered partial results from last saved state")
-                return last_results
+                # Khi phục hồi, chúng ta không có đường dẫn file mới, bao gồm cả web_json_path
+                return last_results, None, None, None
             
-            return f"Error running crew: {str(e)}"
+            return f"Error running crew: {str(e)}", None, None, None
     except Exception as e:
-        print(f"Unidentified error: {str(e)}")
-        return f"Unidentified error: {str(e)}"
+        error_message = f"Unidentified error: {str(e)}"
+        print(error_message)
+        logger.error(error_message)
+        # Trả về 4 giá trị
+        return f"Unidentified error: {str(e)}", None, None, None
 
 def format_vulnerability_report(report_content):
     """
@@ -912,6 +1050,9 @@ def main():
     parser.add_argument('-f', '--full', action='store_true', help='Perform a full scan (all vulnerability types)')
     args = parser.parse_args()
     
+    # Khởi tạo DB
+    init_db()
+    
     # Determine which LLM to use
     use_deepseek = not args.openai  # Default is True (use DeepSeek) if no -o option
     
@@ -930,9 +1071,21 @@ def main():
         print("\nError: URL not provided. Please enter a URL to scan.")
         return 1
     
-    # Run scan
-    results = scan_website(target_url, use_deepseek, scan_type)
+    # Bắt đầu ghi log quét
+    scan_id = log_scan_start(target_url, scan_type)
     
+    # Run scan
+    results, json_report_path, txt_report_path, web_json_report_path = scan_website(target_url, use_deepseek, scan_type, current_scan_id=scan_id)
+    
+    # Cập nhật log quét khi hoàn thành hoặc lỗi
+    # Việc cập nhật web_json_report_path đã được xử lý bên trong scan_website nếu thành công
+    # Ở đây chúng ta chỉ cần cập nhật status chính nếu chưa có web_json_report_path
+    if not web_json_report_path:
+        scan_status = "Completed"
+        if isinstance(results, str) and ("Error:" in results or "Unidentified error:" in results) or not json_report_path:
+            scan_status = "Error"
+        log_scan_end(scan_id, scan_status, json_report_path, txt_report_path, None) # web_json_path là None nếu không được tạo
+
     # Display results
     print("\n==== SECURITY VULNERABILITY ASSESSMENT REPORT ====\n")
     
@@ -1061,4 +1214,7 @@ def load_all_previous_results(task_names, agent_names, target_url):
     return results
 
 if __name__ == "__main__":
+    # Đảm bảo init_db được gọi nếu script chạy trực tiếp và main() không được gọi từ nơi khác
+    if not os.path.exists(DB_NAME):
+        init_db()
     main() 
