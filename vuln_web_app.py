@@ -63,15 +63,36 @@ class ThreadedScan:
             # Count vulnerabilities
             vulnerabilities_count = 0
             if result:
-                # Count all vulnerabilities by category
-                for category, vulns in result.items():
-                    if category not in ['metadata', 'summary'] and isinstance(vulns, list):
-                        vulnerabilities_count += len(vulns)
+                # Kiểm tra xem result có phải là dict không trước khi sử dụng .items()
+                if isinstance(result, dict):
+                    # Count all vulnerabilities by category
+                    for category, vulns in result.items():
+                        if category not in ['metadata', 'summary'] and isinstance(vulns, list):
+                            vulnerabilities_count += len(vulns)
+                elif isinstance(result, str):
+                    # Nếu result là string, có thể là thông báo lỗ hổng hoặc thông báo khác
+                    logger.info(f"Scan result is a string: {result}")
+                    # Không tính là lỗ hổng
+                    vulnerabilities_count = 0
+                else:
+                    # Kiểu dữ liệu khác
+                    logger.info(f"Scan result has unexpected type: {type(result)}")
+                    vulnerabilities_count = 0
             
             # Save report to file
             if result:
                 logger.info("Saving report to file")
-                report_info = save_report_to_file(result, self.target_url, "vulnerability_report.json")
+                
+                # Nếu result là dict, lưu dưới dạng JSON, nếu không thì lưu dưới dạng text
+                if isinstance(result, dict):
+                    report_info = save_report_to_file(result, self.target_url, "vulnerability_report.json")
+                else:
+                    # Lưu kết quả dạng text nếu không phải là dict
+                    report_filename = f"report_{self.target_url.replace('://', '_').replace('/', '_').replace(':', '_')}_{int(time.time())}.txt"
+                    with open(report_filename, 'w', encoding='utf-8') as f:
+                        f.write(str(result))
+                    report_info = report_filename
+                
                 self.report_file = report_info
                 
                 # Calculate duration
@@ -247,7 +268,11 @@ def scan_result(scan_id):
             if isinstance(scan.result, dict):
                 formatted_result = format_vulnerability_report(scan.result)
             else:
-                formatted_result = scan.result
+                # Nếu kết quả không phải là dict, trả về dưới dạng text
+                formatted_result = {
+                    "text_result": str(scan.result),
+                    "type": "text"
+                }
                 
             return jsonify({
                 "status": "completed", 
@@ -360,10 +385,12 @@ def get_report(filename):
                 try:
                     data = json.loads(content)
                     return jsonify({"content": data})
-                except:
-                    return jsonify({"content": content})
+                except json.JSONDecodeError as e:
+                    logger.error(f"Error decoding JSON: {str(e)}")
+                    return jsonify({"content": content, "type": "text", "error": "Invalid JSON format"})
             else:
-                return jsonify({"content": content})
+                # Đây là file text
+                return jsonify({"content": {"text_result": content, "type": "text"}})
         else:
             return jsonify({"error": "Report not found"}), 404
     except Exception as e:

@@ -24,5 +24,25 @@
     "vulnerabilities": 0,
     "status": "error",
     "error": "'str' object has no attribute 'items'"
+  },
+  {
+    "id": "1747102603",
+    "target_url": "http://testphp.vulnweb.com/",
+    "scan_type": "basic",
+    "timestamp": 1747102603,
+    "duration": 364.84,
+    "vulnerabilities": 0,
+    "report_file": "report_http_testphp.vulnweb.com__1747102968.txt",
+    "status": "completed"
+  },
+  {
+    "id": "1747104407",
+    "target_url": "http://testphp.vulnweb.com/",
+    "scan_type": "basic",
+    "timestamp": 1747104407,
+    "duration": 373.79,
+    "vulnerabilities": 0,
+    "report_file": "report_http_testphp.vulnweb.com__1747104780.txt",
+    "status": "completed"
   }
 ]

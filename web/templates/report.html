@@ -47,31 +47,88 @@
         // If the filename contains spaces or special characters it might be URL encoded
         reportFilename = decodeURIComponent(reportFilename);
         
-        // Extract the actual JSON filename from the message if needed
+        // Extract the actual filename from the message if needed
         if (reportFilename.includes("Report saved to file:")) {
-            const match = reportFilename.match(/report_.*\.json/);
+            const match = reportFilename.match(/report_.*\.(json|txt)/);
             if (match) {
                 reportFilename = match[0];
             }
         }
         
-        // Set up download buttons
-        const jsonFilename = reportFilename.endsWith('.json') ? reportFilename : reportFilename + '.json';
-        const txtFilename = jsonFilename.replace('.json', '.txt');
+        // Determine file extensions and set up download buttons
+        let jsonFilename, txtFilename;
+        
+        if (reportFilename.endsWith('.json')) {
+            // If it's a JSON file
+            jsonFilename = reportFilename;
+            txtFilename = reportFilename.replace('.json', '.txt');
+        } else if (reportFilename.endsWith('.txt')) {
+            // If it's a TXT file
+            txtFilename = reportFilename;
+            jsonFilename = reportFilename.replace('.txt', '.json');
+        } else {
+            // If no file extension, assume it's a base name
+            jsonFilename = reportFilename + '.json';
+            txtFilename = reportFilename + '.txt';
+        }
         
         document.getElementById('downloadJsonBtn').href = `/api/report/${jsonFilename}`;
         document.getElementById('downloadTxtBtn').href = `/api/report/${txtFilename}`;
         document.getElementById('reportActions').style.display = 'block';
         
-        // Load the report
-        loadReport(jsonFilename);
+        // Load the report - use the original filename without any modifications
+        loadReport(reportFilename);
     });
     
     function loadReport(filename) {
-        fetch(`/api/report/${filename}`)
+        // First try to load the report with the original filename
+        tryLoadReport(filename)
+            .catch(error => {
+                console.error("Failed to load report with original filename:", error);
+                
+                // If original load fails and filename doesn't have extension, try .txt
+                if (!filename.includes('.')) {
+                    console.log("Trying with .txt extension");
+                    return tryLoadReport(filename + '.txt');
+                } else if (filename.endsWith('.json')) {
+                    // If JSON fails, try TXT
+                    console.log("Trying with .txt instead of .json");
+                    return tryLoadReport(filename.replace('.json', '.txt'));
+                } else if (filename.endsWith('.txt')) {
+                    // If TXT fails, try JSON
+                    console.log("Trying with .json instead of .txt");
+                    return tryLoadReport(filename.replace('.txt', '.json'));
+                }
+                // If all fails, throw the original error
+                throw error;
+            })
+            .catch(error => {
+                document.getElementById('reportLoader').innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="bi bi-exclamation-triangle me-2"></i> ${error.message}
+                    </div>
+                    <div class="mt-3">
+                        <p>Possible reasons:</p>
+                        <ul>
+                            <li>The report file may have been deleted</li>
+                            <li>The file extension might be different (.json or .txt)</li>
+                            <li>There was a server error processing the report</li>
+                        </ul>
+                        <p>
+                            <a href="/history" class="btn btn-primary">
+                                <i class="bi bi-arrow-left"></i> Return to History
+                            </a>
+                        </p>
+                    </div>
+                `;
+            });
+    }
+    
+    function tryLoadReport(filename) {
+        return fetch(`/api/report/${filename}`)
             .then(response => {
                 if (!response.ok) {
-                    throw new Error('Failed to load report');
+                    throw new Error(`Failed to load report: ${response.status} ${response.statusText}`);
                 }
                 return response.json();
             })
@@ -83,13 +140,7 @@
                     // Direct JSON data
                     displayReport(data);
                 }
-            })
-            .catch(error => {
-                document.getElementById('reportLoader').innerHTML = `
-                    <div class="alert alert-danger">
-                        <i class="bi bi-exclamation-triangle me-2"></i> ${error.message}
-                    </div>
-                `;
+                return true; // Successfully loaded
             });
     }
     
@@ -100,6 +151,35 @@
         // Show summary section
         const summarySection = document.getElementById('reportSummary');
         summarySection.style.display = 'block';
+        
+        // Kiểm tra nếu dữ liệu là kết quả dạng text
+        if (data.type === 'text' && data.text_result) {
+            // Hiển thị kết quả dạng text
+            summarySection.innerHTML = `
+                <div class="row">
+                    <div class="col-12">
+                        <div class="alert alert-info">
+                            <i class="bi bi-info-circle me-2"></i>
+                            Scan thành công nhưng không phát hiện lỗ hổng được cấu trúc. Xem kết quả text bên dưới.
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // Hiển thị văn bản kết quả trong phần vulnerabilities
+            document.getElementById('vulnerabilities').innerHTML = `
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title">Scan Result (Text)</h5>
+                    </div>
+                    <div class="card-body">
+                        <pre class="vulnerability-details">${data.text_result}</pre>
+                    </div>
+                </div>
+            `;
+            
+            return;
+        }
         
         // Add metadata
         let targetUrl = '';
