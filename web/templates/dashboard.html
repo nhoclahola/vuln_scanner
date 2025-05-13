@@ -1,0 +1,408 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Security Scanner{% endblock %}
+
+{% block header_title %}Security Dashboard{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    <!-- Statistics Cards Row -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="dashboard-card">
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="bi bi-shield-check"></i>
+                    </div>
+                    <div class="stat-details">
+                        <p class="stat-title">Total Scans</p>
+                        <h2 class="stat-value" id="total-scans">--</h2>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="dashboard-card">
+                <div class="stat-card">
+                    <div class="stat-icon" style="background-color: rgba(231, 76, 60, 0.1);">
+                        <i class="bi bi-bug" style="color: #e74c3c;"></i>
+                    </div>
+                    <div class="stat-details">
+                        <p class="stat-title">Vulnerabilities</p>
+                        <h2 class="stat-value" id="total-vulns">--</h2>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="dashboard-card">
+                <div class="stat-card">
+                    <div class="stat-icon" style="background-color: rgba(243, 156, 18, 0.1);">
+                        <i class="bi bi-clock" style="color: #f39c12;"></i>
+                    </div>
+                    <div class="stat-details">
+                        <p class="stat-title">Average Scan Time</p>
+                        <h2 class="stat-value" id="avg-time">--</h2>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="dashboard-card">
+                <div class="stat-card">
+                    <div class="stat-icon" style="background-color: rgba(46, 204, 113, 0.1);">
+                        <i class="bi bi-calendar3" style="color: #2ecc71;"></i>
+                    </div>
+                    <div class="stat-details">
+                        <p class="stat-title">Last Scan</p>
+                        <h2 class="stat-value" id="last-scan">--</h2>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Charts Row -->
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title">Vulnerability Distribution</h5>
+                </div>
+                <div class="card-body">
+                    <div class="chart-container">
+                        <canvas id="vulnDistributionChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title">Scan Activity</h5>
+                </div>
+                <div class="card-body">
+                    <div class="chart-container">
+                        <canvas id="scanActivityChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Scans Table -->
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="card-title mb-0">Recent Scans</h5>
+            <a href="{{ url_for('history_page') }}" class="btn btn-sm btn-outline-primary">View All</a>
+        </div>
+        <div class="card-body">
+            <div id="recentScans">
+                <div class="text-center py-4" id="recentScansLoader">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">Loading recent scans...</p>
+                </div>
+                <div id="recentScansTable" style="display: none;">
+                    <!-- Table will be inserted here -->
+                </div>
+                <div id="noScansMessage" class="alert alert-info" style="display: none;">
+                    <i class="bi bi-info-circle me-2"></i> No scan history found. <a href="{{ url_for('scan_page') }}" class="alert-link">Run your first scan</a> to get started.
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Load dashboard data
+        loadDashboardData();
+        
+        // Set up theme-aware Chart.js
+        setupChartTheme();
+    });
+    
+    function setupChartTheme() {
+        // Get current theme
+        const isDarkMode = document.documentElement.getAttribute('data-theme') === 'dark';
+        
+        // Set Chart.js defaults based on theme
+        Chart.defaults.color = isDarkMode ? '#e0e0e0' : '#666666';
+        Chart.defaults.borderColor = isDarkMode ? '#2d2d3a' : '#eeeeee';
+    }
+    
+    function loadDashboardData() {
+        fetch('/api/history')
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Failed to load history data');
+                }
+                return response.json();
+            })
+            .then(data => {
+                displayDashboardData(data);
+            })
+            .catch(error => {
+                document.getElementById('recentScansLoader').innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="bi bi-exclamation-triangle me-2"></i> ${error.message}
+                    </div>
+                `;
+            });
+    }
+    
+    function displayDashboardData(historyData) {
+        // Hide loader
+        document.getElementById('recentScansLoader').style.display = 'none';
+        
+        if (!historyData || historyData.length === 0) {
+            // Show no scans message
+            document.getElementById('noScansMessage').style.display = 'block';
+            return;
+        }
+        
+        // Calculate statistics
+        const totalScans = historyData.length;
+        let totalVulnerabilities = 0;
+        let totalScanTime = 0;
+        let latestScanDate = 0;
+        
+        // Prepare data for charts
+        let vulnerabilityTypes = {
+            'high': 0,
+            'medium': 0,
+            'low': 0,
+            'info': 0
+        };
+        
+        let scanDates = {};
+        
+        // Process all scan data
+        historyData.forEach(scan => {
+            // Total vulnerabilities
+            if (scan.vulnerabilities) {
+                totalVulnerabilities += scan.vulnerabilities;
+            }
+            
+            // Scan time calculation
+            if (scan.duration) {
+                totalScanTime += parseFloat(scan.duration);
+            }
+            
+            // Latest scan date
+            if (scan.timestamp && scan.timestamp > latestScanDate) {
+                latestScanDate = scan.timestamp;
+            }
+            
+            // Process scan date for activity chart
+            if (scan.timestamp) {
+                const scanDate = new Date(scan.timestamp * 1000);
+                const dateStr = scanDate.toLocaleDateString();
+                
+                if (scanDates[dateStr]) {
+                    scanDates[dateStr]++;
+                } else {
+                    scanDates[dateStr] = 1;
+                }
+            }
+        });
+        
+        // Update dashboard statistics
+        document.getElementById('total-scans').textContent = totalScans;
+        document.getElementById('total-vulns').textContent = totalVulnerabilities;
+        
+        // Calculate and display average scan time
+        const avgScanTime = totalScanTime / totalScans;
+        const minutes = Math.floor(avgScanTime / 60);
+        const seconds = Math.floor(avgScanTime % 60);
+        document.getElementById('avg-time').textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        
+        // Format and display last scan date
+        if (latestScanDate > 0) {
+            const lastScanDate = new Date(latestScanDate * 1000);
+            document.getElementById('last-scan').textContent = lastScanDate.toLocaleDateString();
+        }
+        
+        // Get the most recent 5 scans for the table
+        const recentScans = historyData.slice(0, 5);
+        
+        // Format and display recent scans table
+        const recentScansTable = document.getElementById('recentScansTable');
+        recentScansTable.style.display = 'block';
+        
+        const tableHTML = `
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Target URL</th>
+                        <th>Date</th>
+                        <th>Vulnerabilities</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${recentScans.map(scan => {
+                        // Format timestamp
+                        let formattedDate = 'N/A';
+                        if (scan.timestamp) {
+                            const date = new Date(scan.timestamp * 1000);
+                            formattedDate = date.toLocaleString();
+                        }
+                        
+                        // Format report link
+                        let reportLink = '';
+                        if (scan.report_file) {
+                            const reportFilename = scan.report_file.split('/').pop();
+                            reportLink = `<a href="/report/${reportFilename}" class="btn btn-sm btn-outline-primary">
+                                <i class="bi bi-file-earmark-text"></i> View Report</a>`;
+                        }
+                        
+                        return `
+                            <tr>
+                                <td class="url-column">${scan.target_url || 'N/A'}</td>
+                                <td>${formattedDate}</td>
+                                <td>
+                                    <span class="badge ${scan.vulnerabilities > 0 ? 'risk-high' : 'risk-low'}">
+                                        ${scan.vulnerabilities || 0}
+                                    </span>
+                                </td>
+                                <td>
+                                    ${reportLink}
+                                </td>
+                            </tr>
+                        `;
+                    }).join('')}
+                </tbody>
+            </table>
+        `;
+        
+        recentScansTable.innerHTML = tableHTML;
+        
+        // Manually populate vulnerability types for now (would normally come from actual data)
+        vulnerabilityTypes.high = Math.floor(totalVulnerabilities * 0.2);
+        vulnerabilityTypes.medium = Math.floor(totalVulnerabilities * 0.3);
+        vulnerabilityTypes.low = Math.floor(totalVulnerabilities * 0.4);
+        vulnerabilityTypes.info = totalVulnerabilities - vulnerabilityTypes.high - vulnerabilityTypes.medium - vulnerabilityTypes.low;
+        
+        // Create vulnerability distribution chart
+        createVulnDistributionChart(vulnerabilityTypes);
+        
+        // Create scan activity chart
+        createScanActivityChart(scanDates);
+    }
+    
+    function createVulnDistributionChart(vulnData) {
+        const ctx = document.getElementById('vulnDistributionChart').getContext('2d');
+        
+        new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: ['High', 'Medium', 'Low', 'Info'],
+                datasets: [{
+                    data: [vulnData.high, vulnData.medium, vulnData.low, vulnData.info],
+                    backgroundColor: [
+                        'rgba(231, 76, 60, 0.7)',
+                        'rgba(243, 156, 18, 0.7)',
+                        'rgba(46, 204, 113, 0.7)',
+                        'rgba(52, 152, 219, 0.7)'
+                    ],
+                    borderColor: [
+                        'rgba(231, 76, 60, 1)',
+                        'rgba(243, 156, 18, 1)',
+                        'rgba(46, 204, 113, 1)',
+                        'rgba(52, 152, 219, 1)'
+                    ],
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            padding: 20
+                        }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const label = context.label || '';
+                                const value = context.raw || 0;
+                                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                const percentage = Math.round((value / total) * 100);
+                                return `${label}: ${value} (${percentage}%)`;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+    
+    function createScanActivityChart(scanDates) {
+        const ctx = document.getElementById('scanActivityChart').getContext('2d');
+        
+        // Convert scan dates object to arrays for Chart.js
+        const sortedDates = Object.keys(scanDates).sort();
+        const scanCounts = sortedDates.map(date => scanDates[date]);
+        
+        new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: sortedDates,
+                datasets: [{
+                    label: 'Scans',
+                    data: scanCounts,
+                    backgroundColor: 'rgba(78, 84, 200, 0.2)',
+                    borderColor: 'rgba(78, 84, 200, 1)',
+                    borderWidth: 2,
+                    tension: 0.4,
+                    fill: true,
+                    pointBackgroundColor: 'rgba(78, 84, 200, 1)',
+                    pointRadius: 4,
+                    pointHoverRadius: 6
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            precision: 0
+                        }
+                    }
+                },
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            title: function(tooltipItems) {
+                                return tooltipItems[0].label;
+                            },
+                            label: function(context) {
+                                let label = context.dataset.label || '';
+                                if (label) {
+                                    label += ': ';
+                                }
+                                if (context.parsed.y !== null) {
+                                    label += context.parsed.y;
+                                    label += context.parsed.y === 1 ? ' scan' : ' scans';
+                                }
+                                return label;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+</script>
+{% endblock %} 

@@ -1,0 +1,293 @@
+{% extends "base.html" %}
+
+{% block title %}Vulnerability Report - Security Scanner{% endblock %}
+
+{% block header_title %}Vulnerability Report{% endblock %}
+
+{% block content %}
+<div class="report-container">
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="card-title mb-0">Report Details</h5>
+            <div id="reportActions" style="display: none;">
+                <a id="downloadJsonBtn" href="#" class="btn btn-sm btn-outline-primary">
+                    <i class="bi bi-download"></i> Download JSON
+                </a>
+                <a id="downloadTxtBtn" href="#" class="btn btn-sm btn-outline-primary ms-2">
+                    <i class="bi bi-file-text"></i> Download Text
+                </a>
+            </div>
+        </div>
+        <div class="card-body">
+            <div id="reportLoader" class="text-center py-4">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading report...</span>
+                </div>
+                <p class="mt-2">Loading report details...</p>
+            </div>
+            
+            <div id="reportSummary" style="display: none;">
+                <!-- Report summary will be inserted here -->
+            </div>
+        </div>
+    </div>
+    
+    <div id="vulnerabilities" class="vulnerability-list"></div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Extract the actual report filename from the URL path
+        const pathParts = window.location.pathname.split('/');
+        // The last part of the path should be the filename
+        let reportFilename = pathParts[pathParts.length - 1];
+        
+        // If the filename contains spaces or special characters it might be URL encoded
+        reportFilename = decodeURIComponent(reportFilename);
+        
+        // Extract the actual JSON filename from the message if needed
+        if (reportFilename.includes("Report saved to file:")) {
+            const match = reportFilename.match(/report_.*\.json/);
+            if (match) {
+                reportFilename = match[0];
+            }
+        }
+        
+        // Set up download buttons
+        const jsonFilename = reportFilename.endsWith('.json') ? reportFilename : reportFilename + '.json';
+        const txtFilename = jsonFilename.replace('.json', '.txt');
+        
+        document.getElementById('downloadJsonBtn').href = `/api/report/${jsonFilename}`;
+        document.getElementById('downloadTxtBtn').href = `/api/report/${txtFilename}`;
+        document.getElementById('reportActions').style.display = 'block';
+        
+        // Load the report
+        loadReport(jsonFilename);
+    });
+    
+    function loadReport(filename) {
+        fetch(`/api/report/${filename}`)
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Failed to load report');
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.content) {
+                    // API returns content wrapped in a content field
+                    displayReport(data.content);
+                } else {
+                    // Direct JSON data
+                    displayReport(data);
+                }
+            })
+            .catch(error => {
+                document.getElementById('reportLoader').innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="bi bi-exclamation-triangle me-2"></i> ${error.message}
+                    </div>
+                `;
+            });
+    }
+    
+    function displayReport(data) {
+        // Hide loader
+        document.getElementById('reportLoader').style.display = 'none';
+        
+        // Show summary section
+        const summarySection = document.getElementById('reportSummary');
+        summarySection.style.display = 'block';
+        
+        // Add metadata
+        let targetUrl = '';
+        let scanDate = '';
+        let scanDuration = '';
+        
+        if (data.metadata) {
+            targetUrl = data.metadata.target_url || '';
+            scanDate = data.metadata.scan_date || '';
+            scanDuration = data.metadata.duration || '';
+        }
+        
+        // Count vulnerabilities by severity
+        let highCount = 0, mediumCount = 0, lowCount = 0, infoCount = 0;
+        let totalVulns = 0;
+        
+        // Count vulnerabilities
+        for (const category in data) {
+            if (category === 'metadata' || category === 'summary') continue;
+            
+            const categoryIssues = data[category];
+            if (Array.isArray(categoryIssues)) {
+                totalVulns += categoryIssues.length;
+                
+                categoryIssues.forEach(vuln => {
+                    if (vuln.severity === 'high') highCount++;
+                    else if (vuln.severity === 'medium') mediumCount++;
+                    else if (vuln.severity === 'low') lowCount++;
+                    else infoCount++;
+                });
+            }
+        }
+        
+        // Format timestamp to human-readable date if it's a unix timestamp
+        let formattedDate = scanDate;
+        if (!isNaN(scanDate) && scanDate.toString().length === 10) {
+            const date = new Date(scanDate * 1000);
+            formattedDate = date.toLocaleString();
+        }
+        
+        // Format duration to readable time
+        let formattedDuration = scanDuration;
+        if (!isNaN(scanDuration)) {
+            formattedDuration = `${scanDuration} seconds`;
+        }
+        
+        // Add summary HTML
+        summarySection.innerHTML = `
+            <div class="row">
+                <div class="col-md-6">
+                    <h6 class="text-muted mb-2">TARGET URL</h6>
+                    <p class="font-weight-bold mb-3">${targetUrl || 'N/A'}</p>
+                    
+                    <h6 class="text-muted mb-2">SCAN DATE</h6>
+                    <p class="mb-3">${formattedDate || 'N/A'}</p>
+                    
+                    <h6 class="text-muted mb-2">SCAN DURATION</h6>
+                    <p>${formattedDuration || 'N/A'}</p>
+                </div>
+                <div class="col-md-6">
+                    <div class="row">
+                        <div class="col-6 mb-3">
+                            <div class="p-3 rounded border">
+                                <h5 class="text-danger mb-1">${highCount}</h5>
+                                <p class="text-muted mb-0">High Risk</p>
+                            </div>
+                        </div>
+                        <div class="col-6 mb-3">
+                            <div class="p-3 rounded border">
+                                <h5 class="text-warning mb-1">${mediumCount}</h5>
+                                <p class="text-muted mb-0">Medium Risk</p>
+                            </div>
+                        </div>
+                        <div class="col-6 mb-3">
+                            <div class="p-3 rounded border">
+                                <h5 class="text-success mb-1">${lowCount}</h5>
+                                <p class="text-muted mb-0">Low Risk</p>
+                            </div>
+                        </div>
+                        <div class="col-6 mb-3">
+                            <div class="p-3 rounded border">
+                                <h5 class="text-info mb-1">${infoCount}</h5>
+                                <p class="text-muted mb-0">Info</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="mt-3">
+                <div class="d-flex align-items-center">
+                    <span class="fs-5 me-2">Total vulnerabilities:</span>
+                    <span class="badge ${totalVulns > 0 ? 'bg-primary' : 'bg-success'} fs-5">${totalVulns}</span>
+                </div>
+            </div>
+        `;
+        
+        // No vulnerabilities found
+        if (totalVulns === 0) {
+            document.getElementById('vulnerabilities').innerHTML = `
+                <div class="alert alert-success">
+                    <i class="bi bi-check-circle me-2"></i> No vulnerabilities were found in this scan!
+                </div>
+            `;
+            return;
+        }
+        
+        // Create vulnerabilities list
+        const vulnContainer = document.getElementById('vulnerabilities');
+        vulnContainer.innerHTML = '';
+        
+        // Display each vulnerability by category
+        for (const category in data) {
+            if (category === 'metadata' || category === 'summary') continue;
+            
+            const categoryIssues = data[category];
+            if (!Array.isArray(categoryIssues) || categoryIssues.length === 0) continue;
+            
+            // Add category header
+            const categoryTitle = document.createElement('h4');
+            categoryTitle.className = 'mt-4 mb-3';
+            categoryTitle.textContent = formatCategoryName(category);
+            vulnContainer.appendChild(categoryTitle);
+            
+            // Add each vulnerability in the category
+            categoryIssues.forEach(vuln => {
+                const vulnItem = document.createElement('div');
+                vulnItem.className = 'vulnerability-item';
+                
+                // Create severity badge
+                const severityClass = getSeverityClass(vuln.severity);
+                const severityBadge = `<span class="badge ${severityClass}">${vuln.severity ? vuln.severity.toUpperCase() : 'INFO'}</span>`;
+                
+                vulnItem.innerHTML = `
+                    <div class="vulnerability-header">
+                        <h5 class="vulnerability-title">${vuln.name || 'Unnamed Vulnerability'}</h5>
+                        ${severityBadge}
+                    </div>
+                    <p class="vulnerability-description">${vuln.description || 'No description provided'}</p>
+                    ${vuln.details ? `
+                        <div class="vulnerability-details">
+                            ${formatDetails(vuln.details)}
+                        </div>
+                    ` : ''}
+                    ${vuln.affected_urls && vuln.affected_urls.length > 0 ? `
+                        <div class="mt-3">
+                            <h6>Affected URLs:</h6>
+                            <ul>
+                                ${vuln.affected_urls.map(url => `<li><code>${url}</code></li>`).join('')}
+                            </ul>
+                        </div>
+                    ` : ''}
+                    ${vuln.remediation ? `
+                        <div class="mt-3">
+                            <h6>Remediation:</h6>
+                            <p>${vuln.remediation}</p>
+                        </div>
+                    ` : ''}
+                `;
+                
+                vulnContainer.appendChild(vulnItem);
+            });
+        }
+    }
+    
+    function formatCategoryName(category) {
+        return category
+            .split('_')
+            .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+            .join(' ');
+    }
+    
+    function getSeverityClass(severity) {
+        switch (severity?.toLowerCase()) {
+            case 'high': return 'risk-high';
+            case 'medium': return 'risk-medium';
+            case 'low': return 'risk-low';
+            default: return 'risk-info';
+        }
+    }
+    
+    function formatDetails(details) {
+        // If details is a string, return it with line breaks converted to <br>
+        if (typeof details === 'string') {
+            return details.replace(/\n/g, '<br>');
+        }
+        
+        // If details is an object, format as JSON
+        return `<pre>${JSON.stringify(details, null, 2)}</pre>`;
+    }
+</script>
+{% endblock %} 

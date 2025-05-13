@@ -1,158 +1,106 @@
 {% extends "base.html" %}
 
-{% block title %}Scan History - Vulnerability Scanner{% endblock %}
+{% block title %}Scan History - Security Scanner{% endblock %}
 
 {% block header_title %}Scan History{% endblock %}
 
 {% block content %}
 <div class="history-container">
-    <div class="row">
-        <!-- Scan History List -->
-        <div class="col-md-4">
-            <div class="card">
-                <div class="card-header">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <h5 class="card-title mb-0">Previous Scans</h5>
-                        <button class="btn btn-sm btn-outline-primary" id="refresh-history-btn">
-                            <i class="bi bi-arrow-clockwise"></i>
-                        </button>
+    <!-- Search and Filter Controls -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-8 mb-3 mb-md-0">
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="text" id="historySearch" class="form-control" placeholder="Search by URL or scan type...">
                     </div>
                 </div>
-                <div class="card-body p-0">
-                    <div class="list-group history-list" id="history-list">
-                        <div class="text-center p-5">
-                            <div class="spinner-border text-primary" role="status">
-                                <span class="visually-hidden">Loading...</span>
-                            </div>
-                            <p class="mt-3">Loading scan history...</p>
-                        </div>
-                    </div>
+                <div class="col-md-4">
+                    <select id="historyFilter" class="form-select">
+                        <option value="all">All Scans</option>
+                        <option value="basic">Basic Scans</option>
+                        <option value="comprehensive">Comprehensive Scans</option>
+                    </select>
                 </div>
             </div>
         </div>
-        
-        <!-- Scan Details -->
-        <div class="col-md-8">
-            <div class="card">
-                <div class="card-header">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <h5 class="card-title mb-0" id="report-title">Scan Details</h5>
-                        <div class="card-actions">
-                            <button class="btn btn-sm btn-outline-primary d-none" id="download-report-btn">
-                                <i class="bi bi-download"></i> Download Report
-                            </button>
+    </div>
+    
+    <!-- History List -->
+    <div class="card">
+        <div class="card-header">
+            <h5 class="card-title mb-0">Scan Records</h5>
+        </div>
+        <div class="card-body">
+            <div id="historyItems">
+                <div id="historyLoader" class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading scan history...</span>
+                    </div>
+                    <p class="mt-2">Loading scan history...</p>
+                </div>
+                
+                <div id="historyTable" style="display: none;">
+                    <!-- History table will be populated here -->
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- No History Alert -->
+    <div id="noHistoryAlert" class="alert alert-info mt-4" style="display: none;">
+        <i class="bi bi-info-circle me-2"></i> No scan history found. <a href="{{ url_for('scan_page') }}" class="alert-link">Run your first scan</a> to get started.
+    </div>
+
+    <!-- History Stats Card -->
+    <div class="card mt-4" id="historyStats" style="display: none;">
+        <div class="card-header">
+            <h5 class="card-title mb-0">Scan Statistics</h5>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-3">
+                    <div class="stat-card">
+                        <div class="stat-icon">
+                            <i class="bi bi-shield-check"></i>
+                        </div>
+                        <div class="stat-details">
+                            <p class="stat-title">Total Scans</p>
+                            <h2 class="stat-value" id="stats-total-scans">0</h2>
                         </div>
                     </div>
                 </div>
-                <div class="card-body">
-                    <!-- Placeholder before selecting a scan -->
-                    <div id="report-placeholder" class="text-center py-5">
-                        <div class="placeholder-icon">
-                            <i class="bi bi-clock-history"></i>
+                <div class="col-md-3">
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background-color: rgba(231, 76, 60, 0.1);">
+                            <i class="bi bi-bug" style="color: #e74c3c;"></i>
                         </div>
-                        <h4 class="mt-4">Select a Scan from History</h4>
-                        <p class="text-muted">Click on any scan from the list to view its details and vulnerability report.</p>
+                        <div class="stat-details">
+                            <p class="stat-title">Vulnerabilities Found</p>
+                            <h2 class="stat-value" id="stats-total-vulns">0</h2>
+                        </div>
                     </div>
-                    
-                    <!-- Report content (hidden initially) -->
-                    <div id="report-content" class="d-none">
-                        <!-- Scan Info -->
-                        <div class="scan-info-section mb-4">
-                            <div class="row">
-                                <div class="col-md-6">
-                                    <div class="info-card">
-                                        <div class="info-icon">
-                                            <i class="bi bi-globe"></i>
-                                        </div>
-                                        <div class="info-content">
-                                            <div class="info-label">Target URL</div>
-                                            <div class="info-value" id="detail-target-url">-</div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="col-md-6">
-                                    <div class="info-card">
-                                        <div class="info-icon">
-                                            <i class="bi bi-calendar-check"></i>
-                                        </div>
-                                        <div class="info-content">
-                                            <div class="info-label">Scan Date</div>
-                                            <div class="info-value" id="detail-scan-date">-</div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="col-md-6 mt-3">
-                                    <div class="info-card">
-                                        <div class="info-icon">
-                                            <i class="bi bi-lightning"></i>
-                                        </div>
-                                        <div class="info-content">
-                                            <div class="info-label">Scan Type</div>
-                                            <div class="info-value" id="detail-scan-type">-</div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="col-md-6 mt-3">
-                                    <div class="info-card">
-                                        <div class="info-icon">
-                                            <i class="bi bi-clock"></i>
-                                        </div>
-                                        <div class="info-content">
-                                            <div class="info-label">Duration</div>
-                                            <div class="info-value" id="detail-duration">-</div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background-color: rgba(243, 156, 18, 0.1);">
+                            <i class="bi bi-clock" style="color: #f39c12;"></i>
                         </div>
-                        
-                        <!-- Report Tabs -->
-                        <ul class="nav nav-tabs" id="reportTabs" role="tablist">
-                            <li class="nav-item" role="presentation">
-                                <button class="nav-link active" id="summary-tab" data-bs-toggle="tab" data-bs-target="#summary" type="button" role="tab">
-                                    Summary
-                                </button>
-                            </li>
-                            <li class="nav-item" role="presentation">
-                                <button class="nav-link" id="details-tab" data-bs-toggle="tab" data-bs-target="#details" type="button" role="tab">
-                                    Detailed Report
-                                </button>
-                            </li>
-                            <li class="nav-item" role="presentation">
-                                <button class="nav-link" id="json-tab" data-bs-toggle="tab" data-bs-target="#json" type="button" role="tab">
-                                    JSON
-                                </button>
-                            </li>
-                        </ul>
-                        
-                        <div class="tab-content mt-3">
-                            <div class="tab-pane fade show active" id="summary" role="tabpanel">
-                                <div id="summary-content" class="vulnerability-summary">
-                                    <div class="text-center py-4">
-                                        <div class="spinner-border text-primary" role="status">
-                                            <span class="visually-hidden">Loading...</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="tab-pane fade" id="details" role="tabpanel">
-                                <div id="details-content" class="vulnerability-details">
-                                    <div class="text-center py-4">
-                                        <div class="spinner-border text-primary" role="status">
-                                            <span class="visually-hidden">Loading...</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="tab-pane fade" id="json" role="tabpanel">
-                                <pre id="json-content" class="json-output">
-                                    <div class="text-center py-4">
-                                        <div class="spinner-border text-primary" role="status">
-                                            <span class="visually-hidden">Loading...</span>
-                                        </div>
-                                    </div>
-                                </pre>
-                            </div>
+                        <div class="stat-details">
+                            <p class="stat-title">Average Scan Time</p>
+                            <h2 class="stat-value" id="stats-avg-time">0:00</h2>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background-color: rgba(46, 204, 113, 0.1);">
+                            <i class="bi bi-calendar3" style="color: #2ecc71;"></i>
+                        </div>
+                        <div class="stat-details">
+                            <p class="stat-title">Last Scan</p>
+                            <h2 class="stat-value" id="stats-last-scan">N/A</h2>
                         </div>
                     </div>
                 </div>
@@ -164,415 +112,198 @@
 
 {% block extra_js %}
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    // Elements
-    const historyList = document.getElementById('history-list');
-    const reportPlaceholder = document.getElementById('report-placeholder');
-    const reportContent = document.getElementById('report-content');
-    const refreshHistoryBtn = document.getElementById('refresh-history-btn');
-    const downloadReportBtn = document.getElementById('download-report-btn');
-    
-    // Detail elements
-    const reportTitle = document.getElementById('report-title');
-    const detailTargetUrl = document.getElementById('detail-target-url');
-    const detailScanDate = document.getElementById('detail-scan-date');
-    const detailScanType = document.getElementById('detail-scan-type');
-    const detailDuration = document.getElementById('detail-duration');
-    
-    // Report content elements
-    const summaryContent = document.getElementById('summary-content');
-    const detailsContent = document.getElementById('details-content');
-    const jsonContent = document.getElementById('json-content');
-    
-    // Load scan history
-    loadScanHistory();
-    
-    // Refresh history button
-    refreshHistoryBtn.addEventListener('click', function() {
+    document.addEventListener('DOMContentLoaded', function() {
+        // Load scan history data
         loadScanHistory();
+        
+        // Add search functionality
+        const searchInput = document.getElementById('historySearch');
+        const filterSelect = document.getElementById('historyFilter');
+        
+        if (searchInput && filterSelect) {
+            searchInput.addEventListener('input', filterHistory);
+            filterSelect.addEventListener('change', filterHistory);
+        }
     });
     
-    // Load scan history
     function loadScanHistory() {
-        // Show loading
-        historyList.innerHTML = `
-            <div class="text-center p-5">
-                <div class="spinner-border text-primary" role="status">
-                    <span class="visually-hidden">Loading...</span>
-                </div>
-                <p class="mt-3">Loading scan history...</p>
-            </div>
-        `;
-        
-        // Fetch history
         fetch('/api/history')
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Failed to load scan history');
+                }
+                return response.json();
+            })
             .then(data => {
-                populateHistoryList(data);
+                displayHistory(data);
             })
             .catch(error => {
-                console.error('Error loading scan history:', error);
-                historyList.innerHTML = `
-                    <div class="text-center p-5">
-                        <div class="alert alert-danger">
-                            <i class="bi bi-exclamation-triangle"></i> Error loading scan history
-                        </div>
+                document.getElementById('historyLoader').innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                        ${error.message}
                     </div>
                 `;
             });
     }
     
-    // Populate history list
-    function populateHistoryList(data) {
-        if (!data.history || data.history.length === 0) {
-            historyList.innerHTML = `
-                <div class="text-center p-5">
-                    <i class="bi bi-inbox" style="font-size: 3rem; color: #ccc;"></i>
-                    <p class="mt-3">No scan history available</p>
-                </div>
-            `;
+    function displayHistory(historyData) {
+        const historyLoader = document.getElementById('historyLoader');
+        const historyTable = document.getElementById('historyTable');
+        const noHistoryAlert = document.getElementById('noHistoryAlert');
+        const historyStats = document.getElementById('historyStats');
+        
+        // Hide loader
+        historyLoader.style.display = 'none';
+        
+        if (!historyData || historyData.length === 0) {
+            // Show no history alert
+            noHistoryAlert.style.display = 'block';
             return;
         }
         
-        historyList.innerHTML = '';
-        const scans = data.history;
+        // Show history table
+        historyTable.style.display = 'block';
         
-        scans.forEach((scan, index) => {
-            const scanEl = document.createElement('a');
-            scanEl.href = '#';
-            scanEl.className = 'list-group-item list-group-item-action';
-            scanEl.setAttribute('data-scan-index', index);
+        // Calculate statistics
+        const totalScans = historyData.length;
+        let totalVulnerabilities = 0;
+        let totalScanTime = 0;
+        let latestScanDate = 0;
+        
+        // Format table
+        const tableHTML = `
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Target URL</th>
+                        <th>Scan Type</th>
+                        <th>Date</th>
+                        <th>Duration</th>
+                        <th>Vulnerabilities</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${historyData.map(item => {
+                        // Calculate stats while iterating
+                        if (item.vulnerabilities) {
+                            totalVulnerabilities += item.vulnerabilities;
+                        }
+                        
+                        if (item.duration) {
+                            totalScanTime += parseFloat(item.duration);
+                        }
+                        
+                        if (item.timestamp && item.timestamp > latestScanDate) {
+                            latestScanDate = item.timestamp;
+                        }
+                        
+                        // Format timestamp
+                        let formattedDate = 'N/A';
+                        if (item.timestamp) {
+                            const date = new Date(item.timestamp * 1000);
+                            formattedDate = date.toLocaleString();
+                        }
+                        
+                        // Format report filename
+                        let reportLink = '';
+                        if (item.report_file) {
+                            const reportFilename = item.report_file.split('/').pop();
+                            reportLink = `<a href="/report/${reportFilename}" class="btn btn-sm btn-outline-primary">
+                                <i class="bi bi-file-earmark-text"></i> View Report</a>`;
+                        }
+                        
+                        return `
+                            <tr>
+                                <td class="url-column">${item.target_url || 'N/A'}</td>
+                                <td>${item.scan_type || 'Basic'}</td>
+                                <td>${formattedDate}</td>
+                                <td>${item.duration ? item.duration + 's' : 'N/A'}</td>
+                                <td>
+                                    <span class="badge ${item.vulnerabilities > 0 ? 'risk-high' : 'risk-low'}">
+                                        ${item.vulnerabilities || 0}
+                                    </span>
+                                </td>
+                                <td class="text-end">
+                                    ${reportLink}
+                                    ${item.report_file ? `
+                                        <button class="btn btn-sm btn-outline-danger ms-2" 
+                                                onclick="deleteReport('${item.report_file}')">
+                                            <i class="bi bi-trash"></i>
+                                        </button>` : ''}
+                                </td>
+                            </tr>
+                        `;
+                    }).join('')}
+                </tbody>
+            </table>
+        `;
+        
+        historyTable.innerHTML = tableHTML;
+        
+        // Update statistics
+        document.getElementById('stats-total-scans').textContent = totalScans;
+        document.getElementById('stats-total-vulns').textContent = totalVulnerabilities;
+        
+        // Calculate average scan time (in seconds)
+        const avgScanTime = totalScanTime / totalScans;
+        const minutes = Math.floor(avgScanTime / 60);
+        const seconds = Math.floor(avgScanTime % 60);
+        document.getElementById('stats-avg-time').textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        
+        // Format last scan date
+        if (latestScanDate > 0) {
+            const lastScanDate = new Date(latestScanDate * 1000);
+            document.getElementById('stats-last-scan').textContent = lastScanDate.toLocaleDateString();
+        }
+        
+        // Show stats card
+        historyStats.style.display = 'block';
+    }
+    
+    function filterHistory() {
+        const searchTerm = document.getElementById('historySearch').value.toLowerCase();
+        const filterValue = document.getElementById('historyFilter').value;
+        
+        const rows = document.querySelectorAll('#historyTable table tbody tr');
+        
+        rows.forEach(row => {
+            const url = row.querySelector('td:first-child').textContent.toLowerCase();
+            const scanType = row.querySelector('td:nth-child(2)').textContent.toLowerCase();
             
-            const scanTypeClass = scan.type === 'full' ? 'bg-primary' : 'bg-info';
-            const scanTypeLabel = scan.type === 'full' ? 'Full Scan' : 'Basic Scan';
+            const matchesSearch = url.includes(searchTerm) || scanType.includes(searchTerm);
+            const matchesFilter = filterValue === 'all' || scanType.toLowerCase().includes(filterValue);
             
-            scanEl.innerHTML = `
-                <div class="d-flex align-items-center">
-                    <div class="history-scan-icon ${scanTypeClass}">
-                        <i class="bi bi-shield"></i>
-                    </div>
-                    <div class="ms-3">
-                        <h6 class="mb-0">${scan.url}</h6>
-                        <small class="text-muted">${scan.time}</small>
-                    </div>
-                    <div class="ms-auto">
-                        <span class="badge ${scanTypeClass}">${scanTypeLabel}</span>
-                    </div>
-                </div>
-            `;
-            
-            scanEl.addEventListener('click', function(e) {
-                e.preventDefault();
-                
-                // Remove active class from all items
-                document.querySelectorAll('.list-group-item').forEach(item => {
-                    item.classList.remove('active');
-                });
-                
-                // Add active class to clicked item
-                this.classList.add('active');
-                
-                // Show report
-                showScanReport(scan);
-            });
-            
-            historyList.appendChild(scanEl);
+            row.style.display = (matchesSearch && matchesFilter) ? '' : 'none';
         });
     }
     
-    // Show scan report
-    function showScanReport(scan) {
-        // Hide placeholder, show content
-        reportPlaceholder.classList.add('d-none');
-        reportContent.classList.remove('d-none');
-        downloadReportBtn.classList.remove('d-none');
-        
-        // Update report title
-        reportTitle.textContent = `Scan for ${scan.url}`;
-        
-        // Update details
-        detailTargetUrl.textContent = scan.url;
-        detailScanDate.textContent = scan.time;
-        detailScanType.textContent = scan.type === 'full' ? 'Full Scan' : 'Basic Scan';
-        detailDuration.textContent = scan.duration || 'N/A';
-        
-        // Check if report file exists
-        if (scan.report_file) {
-            loadReportContent(scan.report_file);
-        } else {
-            // Try to guess report filename
-            const urlPart = scan.url.replace(/https?:\/\//, '').replace(/\./g, '_').replace(/\//g, '_');
-            const jsonFilename = `report_${urlPart}_vulnerability_report.json`;
-            const txtFilename = `report_${urlPart}_vulnerability_report.txt`;
+    function deleteReport(reportFile) {
+        if (confirm('Are you sure you want to delete this report? This action cannot be undone.')) {
+            const filename = reportFile.split('/').pop();
             
-            // First try JSON
-            fetch(`/api/report/${jsonFilename}`)
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error('Report not found');
-                    }
-                    return response.json();
-                })
-                .then(data => {
-                    displayReportContent(data);
-                })
-                .catch(error => {
-                    // Try TXT instead
-                    fetch(`/api/report/${txtFilename}`)
-                        .then(response => {
-                            if (!response.ok) {
-                                throw new Error('Report not found');
-                            }
-                            return response.json();
-                        })
-                        .then(data => {
-                            displayReportContent(data);
-                        })
-                        .catch(error => {
-                            // No report found
-                            summaryContent.innerHTML = '<div class="alert alert-warning">No detailed report available for this scan.</div>';
-                            detailsContent.innerHTML = '<div class="alert alert-warning">No detailed report available for this scan.</div>';
-                            jsonContent.innerHTML = '<div class="alert alert-warning">No detailed report available for this scan.</div>';
-                        });
-                });
-        }
-    }
-    
-    // Load report content
-    function loadReportContent(reportFile) {
-        // Extract filename from report_file (which might contain a success message)
-        const filenameMatch = reportFile.match(/Report saved to file: ([^ ]+) \(JSON\)/);
-        if (filenameMatch && filenameMatch[1]) {
-            const jsonFilename = filenameMatch[1];
-            
-            fetch(`/api/report/${jsonFilename}`)
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error('Report not found');
-                    }
-                    return response.json();
-                })
-                .then(data => {
-                    displayReportContent(data);
-                })
-                .catch(error => {
-                    console.error('Error loading report:', error);
-                    summaryContent.innerHTML = '<div class="alert alert-danger">Error loading report: ' + error.message + '</div>';
-                    detailsContent.innerHTML = '<div class="alert alert-danger">Error loading report: ' + error.message + '</div>';
-                    jsonContent.innerHTML = '<div class="alert alert-danger">Error loading report: ' + error.message + '</div>';
-                });
-        } else {
-            summaryContent.innerHTML = '<div class="alert alert-warning">Report file information not available.</div>';
-            detailsContent.innerHTML = '<div class="alert alert-warning">Report file information not available.</div>';
-            jsonContent.innerHTML = '<div class="alert alert-warning">Report file information not available.</div>';
-        }
-    }
-    
-    // Display report content
-    function displayReportContent(data) {
-        if (!data.content) {
-            summaryContent.innerHTML = '<div class="alert alert-warning">No content available for this report.</div>';
-            detailsContent.innerHTML = '<div class="alert alert-warning">No content available for this report.</div>';
-            jsonContent.innerHTML = '<div class="alert alert-warning">No content available for this report.</div>';
-            return;
-        }
-        
-        const content = data.content;
-        
-        // For text content
-        if (typeof content === 'string') {
-            // Format summary
-            let summaryHtml = '';
-            
-            // Try to extract summary information from markdown-like format
-            if (content.includes('# Comprehensive Vulnerability Assessment Report')) {
-                // Extract executive summary
-                const execSummaryMatch = content.match(/## Executive Summary\s*([\s\S]*?)(?=##|$)/);
-                if (execSummaryMatch && execSummaryMatch[1]) {
-                    const execSummary = execSummaryMatch[1].trim();
-                    summaryHtml += '<div class="summary-section mb-4">';
-                    summaryHtml += '<h3>Executive Summary</h3>';
-                    summaryHtml += `<p>${execSummary.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br>')}</p>`;
-                    summaryHtml += '</div>';
+            fetch(`/api/report/${filename}`, {
+                method: 'DELETE'
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Failed to delete report');
                 }
-                
-                // Extract vulnerability summary
-                const vulnSummaryMatch = content.match(/## Summary of Vulnerabilities\s*([\s\S]*?)(?=##|$)/);
-                if (vulnSummaryMatch && vulnSummaryMatch[1]) {
-                    const vulnSummary = vulnSummaryMatch[1].trim();
-                    summaryHtml += '<div class="summary-section mb-4">';
-                    summaryHtml += '<h3>Vulnerability Summary</h3>';
-                    
-                    // Try to extract risk levels
-                    const criticalMatch = vulnSummary.match(/Critical: (\d+)/i);
-                    const highMatch = vulnSummary.match(/High: (\d+)/i);
-                    const mediumMatch = vulnSummary.match(/Medium: (\d+)/i);
-                    const lowMatch = vulnSummary.match(/Low: (\d+)/i);
-                    
-                    if (criticalMatch || highMatch || mediumMatch || lowMatch) {
-                        summaryHtml += '<div class="risk-summary d-flex flex-wrap">';
-                        
-                        if (criticalMatch) {
-                            summaryHtml += `
-                                <div class="risk-box risk-critical m-2">
-                                    <div class="risk-count">${criticalMatch[1]}</div>
-                                    <div class="risk-label">Critical</div>
-                                </div>
-                            `;
-                        }
-                        
-                        if (highMatch) {
-                            summaryHtml += `
-                                <div class="risk-box risk-high m-2">
-                                    <div class="risk-count">${highMatch[1]}</div>
-                                    <div class="risk-label">High</div>
-                                </div>
-                            `;
-                        }
-                        
-                        if (mediumMatch) {
-                            summaryHtml += `
-                                <div class="risk-box risk-medium m-2">
-                                    <div class="risk-count">${mediumMatch[1]}</div>
-                                    <div class="risk-label">Medium</div>
-                                </div>
-                            `;
-                        }
-                        
-                        if (lowMatch) {
-                            summaryHtml += `
-                                <div class="risk-box risk-low m-2">
-                                    <div class="risk-count">${lowMatch[1]}</div>
-                                    <div class="risk-label">Low</div>
-                                </div>
-                            `;
-                        }
-                        
-                        summaryHtml += '</div>';
-                    } else {
-                        summaryHtml += `<p>${vulnSummary.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br>')}</p>`;
-                    }
-                    
-                    summaryHtml += '</div>';
-                }
-                
-                // Format detailed content
-                let detailsHtml = parseMarkdownToHtml(content);
-                detailsContent.innerHTML = detailsHtml;
-            } else {
-                // Not in markdown format
-                summaryHtml = `<pre>${content}</pre>`;
-                detailsContent.innerHTML = summaryHtml;
-            }
-            
-            summaryContent.innerHTML = summaryHtml;
-            jsonContent.textContent = content;
-        } else {
-            // For JSON content
-            summaryContent.innerHTML = '<pre>' + JSON.stringify(content, null, 2) + '</pre>';
-            detailsContent.innerHTML = '<pre>' + JSON.stringify(content, null, 2) + '</pre>';
-            jsonContent.textContent = JSON.stringify(content, null, 2);
-        }
-    }
-    
-    // Download report
-    downloadReportBtn.addEventListener('click', function() {
-        // Get active scan
-        const activeScan = document.querySelector('.list-group-item.active');
-        if (!activeScan) return;
-        
-        const scanIndex = activeScan.getAttribute('data-scan-index');
-        
-        // Get scan data
-        fetch('/api/history')
-            .then(response => response.json())
+                return response.json();
+            })
             .then(data => {
-                if (!data.history || !data.history[scanIndex]) return;
-                
-                const scan = data.history[scanIndex];
-                const url = scan.url;
-                
-                // Try to guess report filename
-                const urlPart = url.replace(/https?:\/\//, '').replace(/\./g, '_').replace(/\//g, '_');
-                const txtFilename = `report_${urlPart}_vulnerability_report.txt`;
-                
-                // Fetch report content
-                fetch(`/api/report/${txtFilename}`)
-                    .then(response => {
-                        if (!response.ok) {
-                            throw new Error('Report not found');
-                        }
-                        return response.json();
-                    })
-                    .then(data => {
-                        if (!data.content) return;
-                        
-                        // Create download
-                        const blob = new Blob([data.content], { type: 'text/plain' });
-                        const url = window.URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.style.display = 'none';
-                        a.href = url;
-                        a.download = txtFilename;
-                        document.body.appendChild(a);
-                        a.click();
-                        window.URL.revokeObjectURL(url);
-                        document.body.removeChild(a);
-                    })
-                    .catch(error => {
-                        console.error('Error downloading report:', error);
-                        alert('Error downloading report: ' + error.message);
-                    });
+                if (data.success) {
+                    // Reload scan history
+                    loadScanHistory();
+                } else {
+                    alert('Error: ' + (data.message || 'Failed to delete report'));
+                }
             })
             .catch(error => {
-                console.error('Error loading scan history:', error);
+                alert('Error: ' + error.message);
             });
-    });
-    
-    // Helper function to parse markdown-like format to HTML
-    function parseMarkdownToHtml(markdown) {
-        let html = '';
-        const lines = markdown.split('\n');
-        
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            
-            if (line.startsWith('# ')) {
-                html += `<h1>${line.substring(2)}</h1>`;
-            } else if (line.startsWith('## ')) {
-                html += `<h2>${line.substring(3)}</h2>`;
-            } else if (line.startsWith('### ')) {
-                html += `<h3>${line.substring(4)}</h3>`;
-            } else if (line.startsWith('- ')) {
-                html += '<ul>';
-                html += `<li>${line.substring(2)}</li>`;
-                
-                // Look ahead for more list items
-                let j = i + 1;
-                while (j < lines.length && lines[j].startsWith('- ')) {
-                    html += `<li>${lines[j].substring(2)}</li>`;
-                    i = j;
-                    j++;
-                }
-                
-                html += '</ul>';
-            } else if (line.trim() === '') {
-                html += '<br>';
-            } else if (line.includes('Critical:') || line.includes('CRITICAL')) {
-                html += `<p><span class="badge bg-danger">CRITICAL</span> ${line}</p>`;
-            } else if (line.includes('High:') || line.includes('HIGH')) {
-                html += `<p><span class="badge bg-warning text-dark">HIGH</span> ${line}</p>`;
-            } else if (line.includes('Medium:') || line.includes('MEDIUM')) {
-                html += `<p><span class="badge bg-info text-dark">MEDIUM</span> ${line}</p>`;
-            } else if (line.includes('Low:') || line.includes('LOW')) {
-                html += `<p><span class="badge bg-success">LOW</span> ${line}</p>`;
-            } else {
-                html += `<p>${line}</p>`;
-            }
         }
-        
-        return html;
     }
-});
 </script>
 {% endblock %} 

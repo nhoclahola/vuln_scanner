@@ -1,283 +1,681 @@
-/**
- * Main JavaScript file for Vulnerability Scanner
- */
-
 document.addEventListener('DOMContentLoaded', function() {
-    // Dark Mode Toggle
-    setupDarkMode();
+    // Dark mode toggle functionality
+    const darkModeToggle = document.getElementById('darkModeToggle');
+    const htmlElement = document.documentElement;
     
-    // Initialize tooltips
-    initializeTooltips();
+    // Check for saved theme preference or use preferred color scheme
+    const savedTheme = localStorage.getItem('theme');
+    if (savedTheme) {
+        htmlElement.setAttribute('data-theme', savedTheme);
+        updateDarkModeIcon(savedTheme === 'dark');
+    } else {
+        const prefersDarkMode = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        if (prefersDarkMode) {
+            htmlElement.setAttribute('data-theme', 'dark');
+            updateDarkModeIcon(true);
+        }
+    }
     
-    // Add smooth scrolling
-    addSmoothScrolling();
+    // Toggle dark/light mode
+    darkModeToggle.addEventListener('click', function() {
+        const currentTheme = htmlElement.getAttribute('data-theme');
+        const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+        
+        htmlElement.setAttribute('data-theme', newTheme);
+        localStorage.setItem('theme', newTheme);
+        updateDarkModeIcon(newTheme === 'dark');
+    });
     
-    // Make terminal add new output at the bottom
-    initializeTerminals();
+    function updateDarkModeIcon(isDark) {
+        if (isDark) {
+            darkModeToggle.innerHTML = '<i class="bi bi-sun"></i>';
+        } else {
+            darkModeToggle.innerHTML = '<i class="bi bi-moon"></i>';
+        }
+    }
     
-    // Responsive sidebar
-    setupResponsiveSidebar();
+    // Initialize charts if they exist
+    initializeCharts();
+    
+    // Initialize scan form if it exists
+    initializeScanForm();
+    
+    // Load dashboard data if on dashboard page
+    if (document.querySelector('.dashboard-container')) {
+        loadDashboardData();
+    }
+    
+    // Load history data if on history page
+    if (document.querySelector('.history-container')) {
+        loadHistoryData();
+    }
 });
 
-/**
- * Setup dark mode functionality
- */
-function setupDarkMode() {
-    const darkModeToggle = document.getElementById('darkModeToggle');
-    const body = document.body;
-    
-    // Check for saved theme preference
-    const savedTheme = localStorage.getItem('theme');
-    if (savedTheme === 'dark') {
-        body.classList.add('dark-theme');
-        updateDarkModeToggle(true);
+// Initialize Charts
+function initializeCharts() {
+    // Weekly chart
+    const weeklyChartEl = document.getElementById('weeklyChart');
+    if (weeklyChartEl) {
+        const weeklyCtx = weeklyChartEl.getContext('2d');
+        new Chart(weeklyCtx, {
+            type: 'line',
+            data: {
+                labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+                datasets: [
+                    {
+                        label: 'High Risk',
+                        data: [3, 5, 2, 7, 6, 3, 4],
+                        borderColor: '#e74c3c',
+                        backgroundColor: 'rgba(231, 76, 60, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.4
+                    },
+                    {
+                        label: 'Medium Risk',
+                        data: [7, 8, 6, 9, 8, 5, 7],
+                        borderColor: '#f39c12',
+                        backgroundColor: 'rgba(243, 156, 18, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.4
+                    },
+                    {
+                        label: 'Low Risk',
+                        data: [12, 15, 11, 13, 15, 10, 12],
+                        borderColor: '#2ecc71',
+                        backgroundColor: 'rgba(46, 204, 113, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.4
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: {
+                        position: 'top',
+                    },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
     }
     
-    // Handle dark mode toggle
-    if (darkModeToggle) {
-        darkModeToggle.addEventListener('click', function() {
-            if (body.classList.contains('dark-theme')) {
-                body.classList.remove('dark-theme');
-                localStorage.setItem('theme', 'light');
-                updateDarkModeToggle(false);
+    // Monthly chart
+    const monthlyChartEl = document.getElementById('monthlyChart');
+    if (monthlyChartEl) {
+        const monthlyCtx = monthlyChartEl.getContext('2d');
+        new Chart(monthlyCtx, {
+            type: 'line',
+            data: {
+                labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
+                datasets: [
+                    {
+                        label: 'High Risk',
+                        data: [20, 25, 18, 30, 28, 32],
+                        borderColor: '#e74c3c',
+                        backgroundColor: 'rgba(231, 76, 60, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.4
+                    },
+                    {
+                        label: 'Medium Risk',
+                        data: [35, 40, 30, 45, 42, 38],
+                        borderColor: '#f39c12',
+                        backgroundColor: 'rgba(243, 156, 18, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.4
+                    },
+                    {
+                        label: 'Low Risk',
+                        data: [60, 70, 55, 75, 65, 72],
+                        borderColor: '#2ecc71',
+                        backgroundColor: 'rgba(46, 204, 113, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.4
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: {
+                        position: 'top',
+                    },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+    }
+}
+
+// Scan functionality
+function initializeScanForm() {
+    const scanForm = document.getElementById('scanForm');
+    if (!scanForm) return;
+    
+    scanForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        const formData = new FormData(scanForm);
+        const targetUrl = formData.get('url');
+        
+        if (!targetUrl) {
+            alert('Please enter a URL to scan');
+            return;
+        }
+        
+        // Show loading state
+        document.getElementById('scanFormContainer').style.display = 'none';
+        document.getElementById('scanResults').style.display = 'block';
+        document.getElementById('scanProgress').style.width = '0%';
+        document.getElementById('scanProgressText').textContent = '0%';
+        document.getElementById('consoleOutput').innerHTML = '';
+        
+        // Start scan
+        startScan(formData);
+    });
+}
+
+function startScan(formData) {
+    fetch('/api/scan', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.error) {
+            showScanError(data.error);
+            return;
+        }
+        
+        const scanId = data.scan_id;
+        const eventSource = new EventSource('/api/stream');
+        
+        // Listen for scan updates
+        eventSource.addEventListener('message', function(e) {
+            const data = JSON.parse(e.data);
+            
+            // If this message is for our scan
+            if (data.scan_id === scanId) {
+                appendToConsole(data.text);
+            }
+        });
+        
+        // Poll for scan status
+        pollScanStatus(scanId, eventSource);
+    })
+    .catch(error => {
+        showScanError('An error occurred: ' + error.message);
+    });
+}
+
+function pollScanStatus(scanId, eventSource) {
+    const statusUrl = `/api/scan/${scanId}`;
+    
+    fetch(statusUrl)
+        .then(response => response.json())
+        .then(data => {
+            updateScanProgress(data.progress);
+            
+            if (data.status === 'completed') {
+                // Scan completed
+                eventSource.close();
+                fetchScanResults(scanId);
+            } else if (data.status === 'error') {
+                // Scan error
+                eventSource.close();
+                showScanError('An error occurred during the scan');
             } else {
-                body.classList.add('dark-theme');
-                localStorage.setItem('theme', 'dark');
-                updateDarkModeToggle(true);
+                // Poll again after 2 seconds
+                setTimeout(() => pollScanStatus(scanId, eventSource), 2000);
             }
+        })
+        .catch(error => {
+            eventSource.close();
+            showScanError('Error checking scan status: ' + error.message);
+        });
+}
+
+function fetchScanResults(scanId) {
+    fetch(`/api/scan/${scanId}/result`)
+        .then(response => response.json())
+        .then(data => {
+            // Update UI with scan results
+            document.getElementById('scanProgressText').textContent = 'Scan Complete';
+            
+            if (data.report_file) {
+                const viewReportBtn = document.getElementById('viewReportBtn');
+                viewReportBtn.href = `/report/${data.report_file}`;
+                viewReportBtn.style.display = 'inline-block';
+            }
+            
+            // Display vulnerability results
+            displayVulnerabilities(data.result);
+        })
+        .catch(error => {
+            showScanError('Error fetching scan results: ' + error.message);
+        });
+}
+
+function updateScanProgress(progress) {
+    document.getElementById('scanProgress').style.width = `${progress}%`;
+    document.getElementById('scanProgressText').textContent = `${progress}%`;
+}
+
+function appendToConsole(text) {
+    const consoleOutput = document.getElementById('consoleOutput');
+    if (!consoleOutput) return;
+    
+    // Parse ANSI escape codes using the ansiParser
+    const formattedText = window.ansiParser ? window.ansiParser.parse(text) : text;
+    
+    const line = document.createElement('div');
+    line.className = 'console-line';
+    line.innerHTML = formattedText;
+    consoleOutput.appendChild(line);
+    
+    // Auto-scroll to bottom
+    consoleOutput.scrollTop = consoleOutput.scrollHeight;
+}
+
+function showScanError(errorMessage) {
+    document.getElementById('scanError').textContent = errorMessage;
+    document.getElementById('scanError').style.display = 'block';
+    document.getElementById('scanFormContainer').style.display = 'block';
+    document.getElementById('scanResults').style.display = 'none';
+}
+
+function displayVulnerabilities(vulnerabilities) {
+    const resultsContainer = document.getElementById('vulnerabilityResults');
+    resultsContainer.innerHTML = '';
+    
+    if (!vulnerabilities || Object.keys(vulnerabilities).length === 0) {
+        resultsContainer.innerHTML = '<div class="alert alert-success">No vulnerabilities found!</div>';
+        return;
+    }
+    
+    // Create summary card
+    const summaryCard = document.createElement('div');
+    summaryCard.className = 'card mb-4';
+    summaryCard.innerHTML = `
+        <div class="card-header">
+            <h5 class="card-title">Vulnerability Summary</h5>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-3">
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background-color: rgba(231, 76, 60, 0.1);">
+                            <i class="bi bi-exclamation-triangle" style="color: #e74c3c;"></i>
+                        </div>
+                        <div class="stat-details">
+                            <p class="stat-title">High Risk</p>
+                            <h3 class="stat-value" id="highRiskCount">0</h3>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background-color: rgba(243, 156, 18, 0.1);">
+                            <i class="bi bi-exclamation-circle" style="color: #f39c12;"></i>
+                        </div>
+                        <div class="stat-details">
+                            <p class="stat-title">Medium Risk</p>
+                            <h3 class="stat-value" id="mediumRiskCount">0</h3>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background-color: rgba(46, 204, 113, 0.1);">
+                            <i class="bi bi-info-circle" style="color: #2ecc71;"></i>
+                        </div>
+                        <div class="stat-details">
+                            <p class="stat-title">Low Risk</p>
+                            <h3 class="stat-value" id="lowRiskCount">0</h3>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background-color: rgba(52, 152, 219, 0.1);">
+                            <i class="bi bi-info" style="color: #3498db;"></i>
+                        </div>
+                        <div class="stat-details">
+                            <p class="stat-title">Information</p>
+                            <h3 class="stat-value" id="infoCount">0</h3>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    resultsContainer.appendChild(summaryCard);
+    
+    // Add vulnerability list
+    const vulnerabilityList = document.createElement('div');
+    vulnerabilityList.className = 'vulnerability-list';
+    
+    // Count vulnerabilities by severity
+    let highCount = 0, mediumCount = 0, lowCount = 0, infoCount = 0;
+    
+    // Display each vulnerability
+    for (const category in vulnerabilities) {
+        if (category === 'summary' || category === 'metadata') continue;
+        
+        const categoryIssues = vulnerabilities[category];
+        if (!Array.isArray(categoryIssues) || categoryIssues.length === 0) continue;
+        
+        // Add category header
+        const categoryHeader = document.createElement('h4');
+        categoryHeader.className = 'mt-4 mb-3';
+        categoryHeader.textContent = formatCategoryName(category);
+        vulnerabilityList.appendChild(categoryHeader);
+        
+        // Add each vulnerability in the category
+        categoryIssues.forEach(vuln => {
+            // Count by severity
+            if (vuln.severity === 'high') highCount++;
+            else if (vuln.severity === 'medium') mediumCount++;
+            else if (vuln.severity === 'low') lowCount++;
+            else infoCount++;
+            
+            const vulnItem = document.createElement('div');
+            vulnItem.className = 'vulnerability-item';
+            
+            // Create severity badge
+            const severityClass = getSeverityClass(vuln.severity);
+            const severityBadge = `<span class="badge ${severityClass}">${vuln.severity.toUpperCase()}</span>`;
+            
+            vulnItem.innerHTML = `
+                <div class="vulnerability-header">
+                    <h5 class="vulnerability-title">${vuln.name || 'Unnamed Vulnerability'}</h5>
+                    ${severityBadge}
+                </div>
+                <p class="vulnerability-description">${vuln.description || 'No description provided'}</p>
+                ${vuln.details ? `<div class="vulnerability-details">${formatDetails(vuln.details)}</div>` : ''}
+                ${vuln.remediation ? `
+                    <div class="mt-3">
+                        <h6>Remediation:</h6>
+                        <p>${vuln.remediation}</p>
+                    </div>
+                ` : ''}
+            `;
+            
+            vulnerabilityList.appendChild(vulnItem);
         });
     }
+    
+    resultsContainer.appendChild(vulnerabilityList);
+    
+    // Update summary counts
+    document.getElementById('highRiskCount').textContent = highCount;
+    document.getElementById('mediumRiskCount').textContent = mediumCount;
+    document.getElementById('lowRiskCount').textContent = lowCount;
+    document.getElementById('infoCount').textContent = infoCount;
 }
 
-/**
- * Update dark mode toggle button
- * @param {boolean} isDark - Whether dark mode is active
- */
-function updateDarkModeToggle(isDark) {
-    const toggle = document.getElementById('darkModeToggle');
-    if (!toggle) return;
-    
-    const icon = toggle.querySelector('i');
-    if (isDark) {
-        icon.classList.remove('bi-moon');
-        icon.classList.add('bi-sun');
-    } else {
-        icon.classList.remove('bi-sun');
-        icon.classList.add('bi-moon');
+function formatCategoryName(category) {
+    return category
+        .split('_')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ');
+}
+
+function getSeverityClass(severity) {
+    switch (severity.toLowerCase()) {
+        case 'high': return 'risk-high';
+        case 'medium': return 'risk-medium';
+        case 'low': return 'risk-low';
+        default: return 'risk-info';
     }
 }
 
-/**
- * Initialize Bootstrap tooltips
- */
-function initializeTooltips() {
-    const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
-    tooltipTriggerList.map(function(tooltipTriggerEl) {
-        return new bootstrap.Tooltip(tooltipTriggerEl);
+function formatDetails(details) {
+    // If details is a string, return it with line breaks converted to <br>
+    if (typeof details === 'string') {
+        return details.replace(/\n/g, '<br>');
+    }
+    
+    // If details is an object, format as JSON
+    return `<pre>${JSON.stringify(details, null, 2)}</pre>`;
+}
+
+// Load dashboard data
+function loadDashboardData() {
+    // Fetch scan history
+    fetch('/api/history')
+        .then(response => response.json())
+        .then(data => {
+            updateDashboardStats(data);
+            updateRecentScans(data);
+        })
+        .catch(error => {
+            console.error('Error loading dashboard data:', error);
+        });
+        
+    // Fetch report data
+    fetch('/api/reports')
+        .then(response => response.json())
+        .then(data => {
+            updateTopVulnerabilities(data);
+        })
+        .catch(error => {
+            console.error('Error loading report data:', error);
+        });
+}
+
+function updateDashboardStats(data) {
+    if (!data || !Array.isArray(data)) return;
+    
+    // Total scans
+    const totalScans = data.length;
+    const totalScansElement = document.getElementById('total-scans');
+    if (totalScansElement) totalScansElement.textContent = totalScans;
+    
+    // Calculate average scan time
+    let totalScanTime = 0;
+    let validScans = 0;
+    
+    data.forEach(scan => {
+        if (scan.duration && scan.duration !== 'N/A') {
+            const durationParts = scan.duration.split(':');
+            const minutes = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
+            totalScanTime += minutes;
+            validScans++;
+        }
+    });
+    
+    const avgScanTime = validScans > 0 ? Math.round(totalScanTime / validScans) : 0;
+    const avgScanTimeElement = document.getElementById('avg-scan-time');
+    if (avgScanTimeElement) {
+        avgScanTimeElement.textContent = `${Math.floor(avgScanTime / 60)}:${(avgScanTime % 60).toString().padStart(2, '0')}`;
+    }
+}
+
+function updateRecentScans(data) {
+    if (!data || !Array.isArray(data)) return;
+    
+    const recentScansContainer = document.getElementById('recent-scans-list');
+    if (!recentScansContainer) return;
+    
+    // Clear loading indicator
+    recentScansContainer.innerHTML = '';
+    
+    // Get 5 most recent scans
+    const recentScans = data.slice(0, 5);
+    
+    if (recentScans.length === 0) {
+        recentScansContainer.innerHTML = '<p class="text-center text-muted">No scans yet</p>';
+        return;
+    }
+    
+    recentScans.forEach(scan => {
+        const scanItem = document.createElement('div');
+        scanItem.className = 'recent-scan-item p-2 border-bottom';
+        
+        scanItem.innerHTML = `
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h6 class="mb-1 text-truncate" style="max-width: 200px;">${scan.url}</h6>
+                    <p class="small text-muted mb-0">${scan.time}</p>
+                </div>
+                <a href="/report/${scan.report_file}" class="btn btn-sm btn-outline-primary">View</a>
+            </div>
+        `;
+        
+        recentScansContainer.appendChild(scanItem);
     });
 }
 
-/**
- * Add smooth scrolling behavior
- */
-function addSmoothScrolling() {
-    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
-        anchor.addEventListener('click', function(e) {
-            e.preventDefault();
-            
-            const targetId = this.getAttribute('href');
-            if (targetId === '#') return;
-            
-            const targetElement = document.querySelector(targetId);
-            if (targetElement) {
-                targetElement.scrollIntoView({
-                    behavior: 'smooth'
+function updateTopVulnerabilities(data) {
+    if (!data || !Array.isArray(data)) return;
+    
+    const tableBody = document.querySelector('#top-vulnerabilities-table tbody');
+    if (!tableBody) return;
+    
+    // Clear loading indicator
+    tableBody.innerHTML = '';
+    
+    // Extract all vulnerabilities from all reports
+    const allVulnerabilities = [];
+    data.forEach(report => {
+        if (report.file && report.file.endsWith('.json')) {
+            fetch(`/api/report/${report.file}`)
+                .then(response => response.json())
+                .then(reportData => {
+                    // Process the report data to extract vulnerabilities
+                    for (const category in reportData) {
+                        if (category === 'summary' || category === 'metadata') continue;
+                        
+                        const categoryIssues = reportData[category];
+                        if (Array.isArray(categoryIssues)) {
+                            categoryIssues.forEach(vuln => {
+                                allVulnerabilities.push({
+                                    type: vuln.name || category,
+                                    severity: vuln.severity || 'info'
+                                });
+                            });
+                        }
+                    }
+                    
+                    // Now count vulnerabilities by type
+                    const vulnCounts = {};
+                    allVulnerabilities.forEach(vuln => {
+                        if (!vulnCounts[vuln.type]) {
+                            vulnCounts[vuln.type] = {
+                                count: 0,
+                                severity: vuln.severity
+                            };
+                        }
+                        vulnCounts[vuln.type].count++;
+                    });
+                    
+                    // Convert to array and sort by count
+                    const vulnArray = Object.entries(vulnCounts)
+                        .map(([type, data]) => ({
+                            type,
+                            count: data.count,
+                            severity: data.severity
+                        }))
+                        .sort((a, b) => b.count - a.count)
+                        .slice(0, 5);
+                    
+                    // Update table
+                    if (vulnArray.length === 0) {
+                        tableBody.innerHTML = '<tr><td colspan="3" class="text-center">No vulnerabilities found</td></tr>';
+                        return;
+                    }
+                    
+                    tableBody.innerHTML = vulnArray.map(vuln => `
+                        <tr>
+                            <td>${vuln.type}</td>
+                            <td>${vuln.count}</td>
+                            <td><span class="badge ${getSeverityClass(vuln.severity)}">${vuln.severity.toUpperCase()}</span></td>
+                        </tr>
+                    `).join('');
+                })
+                .catch(error => {
+                    console.error('Error loading report:', error);
                 });
-            }
-        });
+        }
     });
 }
 
-/**
- * Initialize terminal elements
- */
-function initializeTerminals() {
-    const terminals = document.querySelectorAll('.terminal');
-    terminals.forEach(terminal => {
-        // Auto-scroll to bottom when content changes
-        const observer = new MutationObserver(() => {
-            terminal.scrollTop = terminal.scrollHeight;
+// Load history data
+function loadHistoryData() {
+    fetch('/api/history')
+        .then(response => response.json())
+        .then(data => {
+            displayHistoryItems(data);
+        })
+        .catch(error => {
+            console.error('Error loading history data:', error);
         });
-        
-        observer.observe(terminal, {
-            childList: true,
-            characterData: true,
-            subtree: true
-        });
-    });
 }
 
-/**
- * Setup responsive sidebar
- */
-function setupResponsiveSidebar() {
-    const sidebar = document.querySelector('.sidebar');
-    const mainContent = document.querySelector('.main-content');
+function displayHistoryItems(scans) {
+    const historyContainer = document.getElementById('historyItems');
+    if (!historyContainer) return;
     
-    if (!sidebar || !mainContent) return;
+    // Clear loading state
+    historyContainer.innerHTML = '';
     
-    // Handle sidebar toggle for mobile
-    const createToggleButton = () => {
-        if (document.getElementById('sidebarToggle')) return;
-        
-        const toggleButton = document.createElement('button');
-        toggleButton.id = 'sidebarToggle';
-        toggleButton.className = 'btn btn-sm btn-outline-primary d-md-none position-fixed';
-        toggleButton.style.top = '10px';
-        toggleButton.style.left = '80px';
-        toggleButton.style.zIndex = '1050';
-        toggleButton.innerHTML = '<i class="bi bi-list"></i>';
-        
-        toggleButton.addEventListener('click', function() {
-            sidebar.classList.toggle('d-none');
-        });
-        
-        document.body.appendChild(toggleButton);
-    };
-    
-    // Add toggle button for mobile
-    const handleResize = () => {
-        if (window.innerWidth < 768) {
-            createToggleButton();
-        } else {
-            const toggleButton = document.getElementById('sidebarToggle');
-            if (toggleButton) {
-                toggleButton.remove();
-            }
-            sidebar.classList.remove('d-none');
-        }
-    };
-    
-    // Initial setup
-    handleResize();
-    
-    // Handle window resize
-    window.addEventListener('resize', handleResize);
-}
-
-/**
- * Format date in user-friendly format
- * @param {string|Date} date - Date to format
- * @returns {string} Formatted date
- */
-function formatDate(date) {
-    if (!date) return 'N/A';
-    
-    const d = new Date(date);
-    if (isNaN(d.getTime())) return date; // Return original if invalid
-    
-    return d.toLocaleString();
-}
-
-/**
- * Format duration in user-friendly format
- * @param {number} seconds - Duration in seconds
- * @returns {string} Formatted duration
- */
-function formatDuration(seconds) {
-    if (!seconds) return 'N/A';
-    
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
-    
-    let result = '';
-    if (hours > 0) result += `${hours}h `;
-    if (minutes > 0) result += `${minutes}m `;
-    result += `${secs}s`;
-    
-    return result;
-}
-
-/**
- * Format number with commas
- * @param {number} num - Number to format
- * @returns {string} Formatted number
- */
-function formatNumber(num) {
-    if (num === undefined || num === null) return '-';
-    return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-}
-
-/**
- * Create a download with specified content
- * @param {string} filename - Name of the file to download
- * @param {string} content - Content of the file
- * @param {string} type - MIME type of the file
- */
-function createDownload(filename, content, type = 'text/plain') {
-    const blob = new Blob([content], { type });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    
-    a.style.display = 'none';
-    a.href = url;
-    a.download = filename;
-    
-    document.body.appendChild(a);
-    a.click();
-    
-    window.URL.revokeObjectURL(url);
-    document.body.removeChild(a);
-}
-
-/**
- * Parse markdown-like text to HTML
- * @param {string} text - Text to parse
- * @returns {string} HTML content
- */
-function parseMarkdown(text) {
-    if (!text) return '';
-    
-    let html = '';
-    const lines = text.split('\n');
-    
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        
-        if (line.startsWith('# ')) {
-            html += `<h1>${line.substring(2)}</h1>`;
-        } else if (line.startsWith('## ')) {
-            html += `<h2>${line.substring(3)}</h2>`;
-        } else if (line.startsWith('### ')) {
-            html += `<h3>${line.substring(4)}</h3>`;
-        } else if (line.startsWith('- ')) {
-            html += '<ul>';
-            html += `<li>${line.substring(2)}</li>`;
-            
-            // Look ahead for more list items
-            let j = i + 1;
-            while (j < lines.length && lines[j].startsWith('- ')) {
-                html += `<li>${lines[j].substring(2)}</li>`;
-                i = j;
-                j++;
-            }
-            
-            html += '</ul>';
-        } else if (line.trim() === '') {
-            html += '<br>';
-        } else if (line.includes('Critical:') || line.includes('CRITICAL')) {
-            html += `<p><span class="badge bg-danger">CRITICAL</span> ${line}</p>`;
-        } else if (line.includes('High:') || line.includes('HIGH')) {
-            html += `<p><span class="badge bg-warning text-dark">HIGH</span> ${line}</p>`;
-        } else if (line.includes('Medium:') || line.includes('MEDIUM')) {
-            html += `<p><span class="badge bg-info text-dark">MEDIUM</span> ${line}</p>`;
-        } else if (line.includes('Low:') || line.includes('LOW')) {
-            html += `<p><span class="badge bg-success">LOW</span> ${line}</p>`;
-        } else {
-            html += `<p>${line}</p>`;
-        }
+    if (!scans || scans.length === 0) {
+        historyContainer.innerHTML = '<div class="alert alert-info">No scan history found</div>';
+        return;
     }
     
-    return html;
+    // Create table
+    const table = document.createElement('table');
+    table.className = 'table table-hover';
+    
+    table.innerHTML = `
+        <thead>
+            <tr>
+                <th>URL</th>
+                <th>Scan Type</th>
+                <th>Date & Time</th>
+                <th>Duration</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    `;
+    
+    const tbody = table.querySelector('tbody');
+    
+    scans.forEach(scan => {
+        const row = document.createElement('tr');
+        
+        row.innerHTML = `
+            <td class="text-truncate" style="max-width: 200px;">${scan.url}</td>
+            <td>${scan.type || 'Standard'}</td>
+            <td>${scan.time}</td>
+            <td>${scan.duration || 'N/A'}</td>
+            <td>
+                <a href="/report/${scan.report_file}" class="btn btn-sm btn-primary">View Report</a>
+            </td>
+        `;
+        
+        tbody.appendChild(row);
+    });
+    
+    historyContainer.appendChild(table);
 } 

@@ -60,31 +60,69 @@ class ThreadedScan:
             self.result = result
             self.status = "completed"
             
+            # Count vulnerabilities
+            vulnerabilities_count = 0
+            if result:
+                # Count all vulnerabilities by category
+                for category, vulns in result.items():
+                    if category not in ['metadata', 'summary'] and isinstance(vulns, list):
+                        vulnerabilities_count += len(vulns)
+            
             # Save report to file
             if result:
                 logger.info("Saving report to file")
                 report_info = save_report_to_file(result, self.target_url, "vulnerability_report.json")
                 self.report_file = report_info
                 
-                # Add to scan history
+                # Calculate duration
+                duration = (self.end_time or datetime.now()) - self.start_time
+                duration_seconds = duration.total_seconds()
+                
+                # Add to scan history with more details
                 scan_record = {
                     "id": self.scan_id,
-                    "url": self.target_url,
-                    "type": self.scan_type,
-                    "time": self.start_time.strftime("%Y-%m-%d %H:%M:%S"),
-                    "duration": str(self.end_time - self.start_time).split('.')[0] if self.end_time else "N/A",
-                    "report_file": report_info
+                    "target_url": self.target_url,
+                    "scan_type": self.scan_type,
+                    "timestamp": int(time.mktime(self.start_time.timetuple())),
+                    "duration": round(duration_seconds, 2),
+                    "vulnerabilities": vulnerabilities_count,
+                    "report_file": report_info,
+                    "status": "completed"
                 }
                 scan_history.append(scan_record)
                 
                 # Save scan history to file
-                with open('scan_history.json', 'w') as f:
-                    json.dump(scan_history, f, default=str)
+                try:
+                    with open('scan_history.json', 'w') as f:
+                        json.dump(scan_history, f, indent=2)
+                except Exception as e:
+                    logger.error(f"Error saving scan history: {str(e)}")
             
         except Exception as e:
             logger.error(f"Error in scan: {str(e)}")
             self.status = "error"
             self.result = {"error": str(e)}
+            
+            # Add error entry to scan history
+            scan_record = {
+                "id": self.scan_id,
+                "target_url": self.target_url,
+                "scan_type": self.scan_type,
+                "timestamp": int(time.mktime(self.start_time.timetuple())),
+                "duration": 0,
+                "vulnerabilities": 0,
+                "status": "error",
+                "error": str(e)
+            }
+            scan_history.append(scan_record)
+            
+            # Try to save scan history
+            try:
+                with open('scan_history.json', 'w') as f:
+                    json.dump(scan_history, f, indent=2)
+            except Exception as ex:
+                logger.error(f"Error saving scan history after error: {str(ex)}")
+                
         finally:
             # Restore stdout and stderr
             sys.stdout = original_stdout
@@ -249,17 +287,38 @@ def history_page():
 # API lấy lịch sử quét
 @app.route('/api/history')
 def get_scan_history():
+    history_data = []
+    
     # Nếu file lịch sử tồn tại, đọc từ đó
     if os.path.exists('scan_history.json'):
         try:
             with open('scan_history.json', 'r') as f:
-                history = json.load(f)
-            return jsonify({"history": history})
+                history_data = json.load(f)
         except Exception as e:
             logger.error(f"Error loading scan history: {str(e)}")
+            # Nếu không đọc được file, dùng biến toàn cục
+            history_data = scan_history
+    else:
+        # Nếu không có file, dùng biến toàn cục
+        history_data = scan_history
     
-    # Nếu không, trả về danh sách từ biến toàn cục
-    return jsonify({"history": scan_history})
+    # Đảm bảo mọi mục đều có các trường cần thiết
+    for item in history_data:
+        # Đảm bảo các trường cơ bản tồn tại
+        if 'target_url' not in item:
+            item['target_url'] = 'unknown'
+        if 'timestamp' not in item:
+            # Sử dụng thời gian hiện tại nếu không có timestamp
+            item['timestamp'] = int(time.time())
+        if 'scan_type' not in item:
+            item['scan_type'] = 'Basic'
+        if 'vulnerabilities' not in item:
+            item['vulnerabilities'] = 0
+    
+    # Sắp xếp theo thời gian mới nhất trước
+    history_data.sort(key=lambda x: x.get('timestamp', 0), reverse=True)
+    
+    return jsonify(history_data)
 
 # API liệt kê báo cáo
 @app.route('/api/reports')
@@ -309,6 +368,38 @@ def get_report(filename):
             return jsonify({"error": "Report not found"}), 404
     except Exception as e:
         return jsonify({"error": f"Error reading report: {str(e)}"}), 500
+
+# API xóa báo cáo
+@app.route('/api/report/<path:filename>', methods=['DELETE'])
+def delete_report(filename):
+    """Delete a specific report"""
+    try:
+        if os.path.exists(filename):
+            # Delete the JSON file
+            os.remove(filename)
+            
+            # Also remove corresponding text file if it exists
+            txt_filename = filename.replace('.json', '.txt')
+            if os.path.exists(txt_filename):
+                os.remove(txt_filename)
+                
+            # Update scan history if needed
+            global scan_history
+            # Filter out entries with this report file
+            scan_history = [scan for scan in scan_history if scan.get('report_file') != filename]
+            
+            # Save updated history
+            try:
+                with open('scan_history.json', 'w') as f:
+                    json.dump(scan_history, f)
+            except Exception as e:
+                logger.error(f"Error saving scan history after deletion: {str(e)}")
+            
+            return jsonify({"success": True, "message": "Report deleted successfully"})
+        else:
+            return jsonify({"success": False, "error": "Report not found"}), 404
+    except Exception as e:
+        return jsonify({"success": False, "error": f"Error deleting report: {str(e)}"}), 500
 
 # Trang chi tiết báo cáo
 @app.route('/report/<path:filename>')
