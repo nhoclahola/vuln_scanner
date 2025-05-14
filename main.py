@@ -390,17 +390,27 @@ def scan_website(target_url=None, use_deepseek=True, scan_type="basic", current_
         reports_dir = "scan_reports"
         os.makedirs(reports_dir, exist_ok=True)
         
-        # Helper for filename sanitation
-        def get_safe_filename_prefix(url_str):
-            return url_str.replace("://", "_").replace("http_", "").replace("https_", "").replace(".", "_").replace("/", "_").replace(":", "_")
+        # Helper for filename sanitation, now includes a timestamp
+        def get_safe_filename_prefix_with_timestamp(url_str):
+            # Sanitize URL part
+            name = url_str.replace("http://", "").replace("https://", "") # Remove protocol
+            name = name.replace("/", "_") # Replace slashes
+            name = "".join(c if c.isalnum() or c in ['.', '_', '-'] else '_' for c in name) # Keep dots, underscores, hyphens
+            name = name.strip('_.') # Clean leading/trailing unwanted chars
+            if not name: # Handle empty name after sanitization (e.g. if URL was just "http://")
+                name = "default_target"
+            
+            # Add timestamp
+            timestamp_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            return f"{name}_{timestamp_str}"
 
-        safe_prefix = get_safe_filename_prefix(target_url)
+        safe_filename_base = get_safe_filename_prefix_with_timestamp(target_url)
 
         # 1. Save the main JSON report (from JSON Formatter Agent)
         main_json_report_path = None
         try:
             final_json_dict = json.loads(final_json_str) # The formatter agent should output a valid JSON string
-            main_json_report_filename = f"report_{safe_prefix}_vulnerability.json"
+            main_json_report_filename = f"report_{safe_filename_base}_vulnerability.json"
             main_json_report_path = os.path.join(reports_dir, main_json_report_filename)
             with open(main_json_report_path, 'w', encoding='utf-8') as f:
                 json.dump(final_json_dict, f, indent=4, ensure_ascii=False)
@@ -408,7 +418,7 @@ def scan_website(target_url=None, use_deepseek=True, scan_type="basic", current_
         except json.JSONDecodeError:
             logger.error(f"JSON Report Formatter Agent did not return a valid JSON string. Raw output: {final_json_str[:500]}...") # Log snippet
             # Save the raw invalid output for debugging
-            main_json_report_filename = f"report_{safe_prefix}_vulnerability_INVALID.json"
+            main_json_report_filename = f"report_{safe_filename_base}_vulnerability_INVALID.json"
             main_json_report_path = os.path.join(reports_dir, main_json_report_filename)
             with open(main_json_report_path, 'w', encoding='utf-8') as f:
                 f.write(final_json_str)
@@ -416,7 +426,7 @@ def scan_website(target_url=None, use_deepseek=True, scan_type="basic", current_
             # final_json_dict remains None or an error dict if needed later
 
         # 2. Save the Markdown report (from Security Analyst Agent's output)
-        md_report_filename = f"report_{safe_prefix}_vulnerability.md"
+        md_report_filename = f"report_{safe_filename_base}_vulnerability.md"
         md_report_path = os.path.join(reports_dir, md_report_filename)
         
         # The analyst_report_content is the direct output from the security analyst.
