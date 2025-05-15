@@ -13,8 +13,8 @@
                 <a id="downloadJsonBtn" href="#" class="btn btn-sm btn-outline-primary">
                     <i class="bi bi-download"></i> Download JSON
                 </a>
-                <a id="downloadTxtBtn" href="#" class="btn btn-sm btn-outline-primary ms-2">
-                    <i class="bi bi-file-text"></i> Download Text
+                <a id="downloadMdBtn" href="#" class="btn btn-sm btn-outline-primary ms-2">
+                    <i class="bi bi-file-text"></i> Download Markdown
                 </a>
             </div>
         </div>
@@ -32,72 +32,160 @@
         </div>
     </div>
     
+    <!-- Visualization Dashboard Section -->
+    <div id="visualizationDashboard" class="card mb-4" style="display: none;">
+        <div class="card-header">
+            <h5 class="card-title mb-0">Vulnerability Dashboard</h5>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-6 mb-4">
+                    <div class="card h-100">
+                        <div class="card-header">
+                            <h6 class="card-title mb-0">Severity Distribution</h6>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="severityChart" width="400" height="300"></canvas>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6 mb-4">
+                    <div class="card h-100">
+                        <div class="card-header">
+                            <h6 class="card-title mb-0">Vulnerability Type</h6>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="vulnerabilityTypeChart" width="400" height="300"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-12">
+                    <div class="card">
+                        <div class="card-header">
+                            <h6 class="card-title mb-0">CVSS Risk Score</h6>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="cvssScoreChart" width="800" height="200"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
     <div id="vulnerabilities" class="vulnerability-list"></div>
+    
+    <!-- Markdown Report Container -->
+    <div id="markdownReport" class="card mb-4" style="display: none;">
+        <div class="card-header">
+            <h5 class="card-title mb-0">Vulnerability Report (Markdown)</h5>
+        </div>
+        <div class="card-body">
+            <div id="markdownContent" class="markdown-content"></div>
+        </div>
+    </div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
+<!-- Include Markdown parser for rendering markdown reports -->
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<!-- Include Chart.js for visualization -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
     document.addEventListener('DOMContentLoaded', function() {
         // Extract the actual report filename from the URL path
         const pathParts = window.location.pathname.split('/');
         // The last part of the path should be the filename
-        let reportFilename = pathParts[pathParts.length - 1];
+        let reportPath = pathParts[pathParts.length - 1];
         
-        // If the filename contains spaces or special characters it might be URL encoded
-        reportFilename = decodeURIComponent(reportFilename);
+        // If the path contains spaces or special characters it might be URL encoded
+        reportPath = decodeURIComponent(reportPath);
         
-        // Extract the actual filename from the message if needed
-        if (reportFilename.includes("Report saved to file:")) {
-            const match = reportFilename.match(/report_.*\.(json|txt)/);
-            if (match) {
-                reportFilename = match[0];
+        // Kiểm tra nếu reportPath là undefined hoặc null hoặc "undefined"
+        if (!reportPath || reportPath === 'undefined') {
+            document.getElementById('reportLoader').innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="bi bi-exclamation-triangle me-2"></i> Invalid report path.
+                </div>
+                <div class="mt-3">
+                    <a href="/history" class="btn btn-primary">
+                        <i class="bi bi-arrow-left"></i> Return to History
+                    </a>
+                </div>
+            `;
+            return;
+        }
+        
+        // Check if this is a scan_reports path or original format
+        if (!reportPath.includes('/')) {
+            // For backward compatibility, check if it's in scan_reports directory
+            if (reportPath.startsWith('report_')) {
+                reportPath = 'scan_reports/' + reportPath;
             }
         }
         
         // Determine file extensions and set up download buttons
-        let jsonFilename, txtFilename;
+        let jsonPath, mdPath;
         
-        if (reportFilename.endsWith('.json')) {
+        if (reportPath.endsWith('.json')) {
             // If it's a JSON file
-            jsonFilename = reportFilename;
-            txtFilename = reportFilename.replace('.json', '.txt');
-        } else if (reportFilename.endsWith('.txt')) {
-            // If it's a TXT file
-            txtFilename = reportFilename;
-            jsonFilename = reportFilename.replace('.txt', '.json');
+            jsonPath = reportPath;
+            mdPath = reportPath.replace('.json', '.md');
+        } else if (reportPath.endsWith('.md')) {
+            // If it's a Markdown file
+            mdPath = reportPath;
+            jsonPath = reportPath.replace('.md', '.json');
+        } else if (reportPath.endsWith('.txt')) {
+            // If it's a TXT file (backward compatibility)
+            jsonPath = reportPath.replace('.txt', '.json');
+            mdPath = reportPath.replace('.txt', '.md');
         } else {
-            // If no file extension, assume it's a base name
-            jsonFilename = reportFilename + '.json';
-            txtFilename = reportFilename + '.txt';
+            // If no file extension, try both
+            jsonPath = reportPath + '.json';
+            mdPath = reportPath + '.md';
         }
         
-        document.getElementById('downloadJsonBtn').href = `/api/report/${jsonFilename}`;
-        document.getElementById('downloadTxtBtn').href = `/api/report/${txtFilename}`;
+        document.getElementById('downloadJsonBtn').href = `/api/report/${jsonPath}`;
+        document.getElementById('downloadJsonBtn').download = jsonPath.split('/').pop();
+        
+        document.getElementById('downloadMdBtn').href = `/api/report/${mdPath}`;
+        document.getElementById('downloadMdBtn').download = mdPath.split('/').pop();
+        
         document.getElementById('reportActions').style.display = 'block';
         
-        // Load the report - use the original filename without any modifications
-        loadReport(reportFilename);
+        // Load the report - use the original path
+        loadReport(reportPath);
     });
     
-    function loadReport(filename) {
-        // First try to load the report with the original filename
-        tryLoadReport(filename)
+    function loadReport(path) {
+        // First try to load the report with the original path
+        tryLoadReport(path)
             .catch(error => {
-                console.error("Failed to load report with original filename:", error);
+                console.error("Failed to load report with original path:", error);
                 
-                // If original load fails and filename doesn't have extension, try .txt
-                if (!filename.includes('.')) {
-                    console.log("Trying with .txt extension");
-                    return tryLoadReport(filename + '.txt');
-                } else if (filename.endsWith('.json')) {
-                    // If JSON fails, try TXT
-                    console.log("Trying with .txt instead of .json");
-                    return tryLoadReport(filename.replace('.json', '.txt'));
-                } else if (filename.endsWith('.txt')) {
+                // If original load fails, try alternatives
+                if (!path.includes('.')) {
+                    console.log("Trying with .json extension");
+                    return tryLoadReport(path + '.json')
+                        .catch(e => {
+                            console.log("Trying with .md extension");
+                            return tryLoadReport(path + '.md');
+                        });
+                } else if (path.endsWith('.json')) {
+                    // If JSON fails, try MD
+                    console.log("Trying with .md instead of .json");
+                    return tryLoadReport(path.replace('.json', '.md'));
+                } else if (path.endsWith('.md')) {
+                    // If MD fails, try JSON
+                    console.log("Trying with .json instead of .md");
+                    return tryLoadReport(path.replace('.md', '.json'));
+                } else if (path.endsWith('.txt')) {
                     // If TXT fails, try JSON
                     console.log("Trying with .json instead of .txt");
-                    return tryLoadReport(filename.replace('.txt', '.json'));
+                    return tryLoadReport(path.replace('.txt', '.json'));
                 }
                 // If all fails, throw the original error
                 throw error;
@@ -111,7 +199,7 @@
                         <p>Possible reasons:</p>
                         <ul>
                             <li>The report file may have been deleted</li>
-                            <li>The file extension might be different (.json or .txt)</li>
+                            <li>The file extension might be different (.json or .md)</li>
                             <li>There was a server error processing the report</li>
                         </ul>
                         <p>
@@ -124,8 +212,8 @@
             });
     }
     
-    function tryLoadReport(filename) {
-        return fetch(`/api/report/${filename}`)
+    function tryLoadReport(path) {
+        return fetch(`/api/report/${path}`)
             .then(response => {
                 if (!response.ok) {
                     throw new Error(`Failed to load report: ${response.status} ${response.statusText}`);
@@ -135,20 +223,26 @@
             .then(data => {
                 if (data.content) {
                     // API returns content wrapped in a content field
-                    displayReport(data.content);
+                    displayReport(data.content, path);
                 } else {
                     // Direct JSON data
-                    displayReport(data);
+                    displayReport(data, path);
                 }
                 return true; // Successfully loaded
             });
     }
     
-    function displayReport(data) {
+    function displayReport(data, path) {
         // Hide loader
         document.getElementById('reportLoader').style.display = 'none';
         
-        // Show summary section
+        // Check if this is a markdown report
+        if ((data.type === 'markdown') || (path && path.endsWith('.md'))) {
+            displayMarkdownReport(data.content || data);
+            return;
+        }
+        
+        // Show summary section for JSON reports
         const summarySection = document.getElementById('reportSummary');
         summarySection.style.display = 'block';
         
@@ -181,193 +275,441 @@
             return;
         }
         
-        // Add metadata
+        // Process JSON report - Check for different formats
         let targetUrl = '';
         let scanDate = '';
-        let scanDuration = '';
-        
-        if (data.metadata) {
-            targetUrl = data.metadata.target_url || '';
-            scanDate = data.metadata.scan_date || '';
-            scanDuration = data.metadata.duration || '';
-        }
-        
-        // Count vulnerabilities by severity
-        let highCount = 0, mediumCount = 0, lowCount = 0, infoCount = 0;
         let totalVulns = 0;
+        let vulnerabilities = [];
         
-        // Count vulnerabilities
-        for (const category in data) {
-            if (category === 'metadata' || category === 'summary') continue;
+        // Extract from "summary" format (JSON Formatter Agent output)
+        if (data.summary) {
+            targetUrl = data.summary.target_url || '';
+            scanDate = data.summary.scan_timestamp || '';
+            totalVulns = data.summary.total_vulnerabilities || 0;
             
-            const categoryIssues = data[category];
-            if (Array.isArray(categoryIssues)) {
-                totalVulns += categoryIssues.length;
-                
-                categoryIssues.forEach(vuln => {
-                    if (vuln.severity === 'high') highCount++;
-                    else if (vuln.severity === 'medium') mediumCount++;
-                    else if (vuln.severity === 'low') lowCount++;
-                    else infoCount++;
-                });
+            // Extract vulnerabilities
+            if (data.vulnerabilities && Array.isArray(data.vulnerabilities)) {
+                vulnerabilities = data.vulnerabilities;
+            }
+        } 
+        // Extract from older format
+        else if (data.findings) {
+            vulnerabilities = data.findings;
+            totalVulns = vulnerabilities.length;
+            
+            if (data.target_url) {
+                targetUrl = data.target_url;
+            }
+            
+            if (data.scan_date) {
+                scanDate = data.scan_date;
             }
         }
         
-        // Format timestamp to human-readable date if it's a unix timestamp
-        let formattedDate = scanDate;
-        if (!isNaN(scanDate) && scanDate.toString().length === 10) {
-            const date = new Date(scanDate * 1000);
-            formattedDate = date.toLocaleString();
-        }
+        // Count vulnerabilities by severity
+        let criticalCount = 0, highCount = 0, mediumCount = 0, lowCount = 0;
         
-        // Format duration to readable time
-        let formattedDuration = scanDuration;
-        if (!isNaN(scanDuration)) {
-            formattedDuration = `${scanDuration} seconds`;
-        }
+        vulnerabilities.forEach(vuln => {
+            if (!vuln.severity) return;
+            
+            const severity = vuln.severity.toLowerCase();
+            if (severity.includes('critical')) criticalCount++;
+            else if (severity.includes('high')) highCount++;
+            else if (severity.includes('medium')) mediumCount++;
+            else if (severity.includes('low')) lowCount++;
+        });
         
-        // Add summary HTML
+        // Generate summary card
         summarySection.innerHTML = `
-            <div class="row">
+            <div class="row mb-4">
                 <div class="col-md-6">
-                    <h6 class="text-muted mb-2">TARGET URL</h6>
-                    <p class="font-weight-bold mb-3">${targetUrl || 'N/A'}</p>
-                    
-                    <h6 class="text-muted mb-2">SCAN DATE</h6>
-                    <p class="mb-3">${formattedDate || 'N/A'}</p>
-                    
-                    <h6 class="text-muted mb-2">SCAN DURATION</h6>
-                    <p>${formattedDuration || 'N/A'}</p>
+                    <h5>Target: ${escapeHtml(targetUrl)}</h5>
+                    <p class="text-muted">Scanned on: ${scanDate || 'Unknown'}</p>
                 </div>
-                <div class="col-md-6">
-                    <div class="row">
-                        <div class="col-6 mb-3">
-                            <div class="p-3 rounded border">
-                                <h5 class="text-danger mb-1">${highCount}</h5>
-                                <p class="text-muted mb-0">High Risk</p>
-                            </div>
-                        </div>
-                        <div class="col-6 mb-3">
-                            <div class="p-3 rounded border">
-                                <h5 class="text-warning mb-1">${mediumCount}</h5>
-                                <p class="text-muted mb-0">Medium Risk</p>
-                            </div>
-                        </div>
-                        <div class="col-6 mb-3">
-                            <div class="p-3 rounded border">
-                                <h5 class="text-success mb-1">${lowCount}</h5>
-                                <p class="text-muted mb-0">Low Risk</p>
-                            </div>
-                        </div>
-                        <div class="col-6 mb-3">
-                            <div class="p-3 rounded border">
-                                <h5 class="text-info mb-1">${infoCount}</h5>
-                                <p class="text-muted mb-0">Info</p>
-                            </div>
-                        </div>
-                    </div>
+                <div class="col-md-6 text-md-end">
+                    <span class="badge bg-danger me-2">${criticalCount} Critical</span>
+                    <span class="badge bg-warning text-dark me-2">${highCount} High</span>
+                    <span class="badge bg-primary me-2">${mediumCount} Medium</span>
+                    <span class="badge bg-info text-dark">${lowCount} Low</span>
                 </div>
             </div>
-            <div class="mt-3">
-                <div class="d-flex align-items-center">
-                    <span class="fs-5 me-2">Total vulnerabilities:</span>
-                    <span class="badge ${totalVulns > 0 ? 'bg-primary' : 'bg-success'} fs-5">${totalVulns}</span>
+            
+            <div class="d-flex align-items-center mb-3">
+                <div class="progress flex-grow-1 me-3" style="height: 10px;">
+                    <div class="progress-bar bg-danger" role="progressbar" style="width: ${getPercentage(criticalCount, totalVulns)}%" aria-valuenow="${criticalCount}" aria-valuemin="0" aria-valuemax="${totalVulns}"></div>
+                    <div class="progress-bar bg-warning" role="progressbar" style="width: ${getPercentage(highCount, totalVulns)}%" aria-valuenow="${highCount}" aria-valuemin="0" aria-valuemax="${totalVulns}"></div>
+                    <div class="progress-bar bg-primary" role="progressbar" style="width: ${getPercentage(mediumCount, totalVulns)}%" aria-valuenow="${mediumCount}" aria-valuemin="0" aria-valuemax="${totalVulns}"></div>
+                    <div class="progress-bar bg-info" role="progressbar" style="width: ${getPercentage(lowCount, totalVulns)}%" aria-valuenow="${lowCount}" aria-valuemin="0" aria-valuemax="${totalVulns}"></div>
+                </div>
+                <span class="badge bg-secondary">${totalVulns} Total</span>
+            </div>
+        `;
+        
+        // If we have vulnerabilities, show the visualization dashboard
+        if (vulnerabilities.length > 0) {
+            document.getElementById('visualizationDashboard').style.display = 'block';
+            createVisualizationCharts(vulnerabilities, criticalCount, highCount, mediumCount, lowCount);
+        }
+        
+        // Generate vulnerability cards
+        let vulnerabilityHTML = '';
+        
+        // First Critical
+        vulnerabilityHTML += generateVulnerabilityGroup('Critical', 'danger', vulnerabilities.filter(v => v.severity && v.severity.toLowerCase().includes('critical')));
+        
+        // Then High
+        vulnerabilityHTML += generateVulnerabilityGroup('High', 'warning', vulnerabilities.filter(v => v.severity && v.severity.toLowerCase().includes('high')));
+        
+        // Then Medium
+        vulnerabilityHTML += generateVulnerabilityGroup('Medium', 'primary', vulnerabilities.filter(v => v.severity && v.severity.toLowerCase().includes('medium')));
+        
+        // Then Low
+        vulnerabilityHTML += generateVulnerabilityGroup('Low', 'info', vulnerabilities.filter(v => v.severity && v.severity.toLowerCase().includes('low')));
+        
+        // Check if we have any vulnerabilities
+        if (vulnerabilityHTML) {
+            document.getElementById('vulnerabilities').innerHTML = vulnerabilityHTML;
+        } else {
+            document.getElementById('vulnerabilities').innerHTML = `
+                <div class="alert alert-success">
+                    <i class="bi bi-check-circle me-2"></i>
+                    No vulnerabilities found in this scan.
+                </div>
+            `;
+        }
+    }
+    
+    function createVisualizationCharts(vulnerabilities, criticalCount, highCount, mediumCount, lowCount) {
+        // Create severity distribution chart (pie chart)
+        const severityCtx = document.getElementById('severityChart').getContext('2d');
+        new Chart(severityCtx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Critical', 'High', 'Medium', 'Low'],
+                datasets: [{
+                    data: [criticalCount, highCount, mediumCount, lowCount],
+                    backgroundColor: ['#dc3545', '#ffc107', '#0d6efd', '#0dcaf0'],
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: {
+                        position: 'right',
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const label = context.label || '';
+                                const value = context.raw || 0;
+                                const total = context.chart.data.datasets[0].data.reduce((a, b) => a + b, 0);
+                                const percentage = Math.round((value / total) * 100);
+                                return `${label}: ${value} (${percentage}%)`;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        
+        // Count by vulnerability type
+        const vulnTypes = {};
+        vulnerabilities.forEach(vuln => {
+            const type = vuln.name || vuln.type || 'Unknown';
+            vulnTypes[type] = (vulnTypes[type] || 0) + 1;
+        });
+        
+        // Sort by count (descending)
+        const sortedTypes = Object.entries(vulnTypes)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 5); // Get top 5
+        
+        // Create vulnerability type chart (bar chart)
+        const typeCtx = document.getElementById('vulnerabilityTypeChart').getContext('2d');
+        new Chart(typeCtx, {
+            type: 'bar',
+            data: {
+                labels: sortedTypes.map(entry => entry[0]),
+                datasets: [{
+                    label: 'Count',
+                    data: sortedTypes.map(entry => entry[1]),
+                    backgroundColor: '#0d6efd',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    title: {
+                        display: true,
+                        text: 'Top Vulnerability Types'
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            precision: 0
+                        }
+                    }
+                }
+            }
+        });
+        
+        // CVSS score chart (if available)
+        const vulnsWithCvss = vulnerabilities.filter(v => v.cvss_score);
+        if (vulnsWithCvss.length > 0) {
+            // Sort by CVSS score (descending)
+            vulnsWithCvss.sort((a, b) => b.cvss_score - a.cvss_score);
+            
+            const cvssCtx = document.getElementById('cvssScoreChart').getContext('2d');
+            new Chart(cvssCtx, {
+                type: 'bar',
+                data: {
+                    labels: vulnsWithCvss.map(v => v.name || v.type || 'Unknown'),
+                    datasets: [{
+                        label: 'CVSS Score',
+                        data: vulnsWithCvss.map(v => v.cvss_score),
+                        backgroundColor: vulnsWithCvss.map(v => {
+                            const score = v.cvss_score;
+                            if (score >= 9.0) return '#dc3545'; // Critical
+                            if (score >= 7.0) return '#ffc107'; // High
+                            if (score >= 4.0) return '#0d6efd'; // Medium
+                            return '#0dcaf0'; // Low
+                        }),
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    },
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            max: 10,
+                            title: {
+                                display: true,
+                                text: 'CVSS Score (0-10)'
+                            }
+                        }
+                    }
+                }
+            });
+        } else {
+            // If no CVSS scores, show message
+            document.getElementById('cvssScoreChart').parentNode.innerHTML = `
+                <div class="alert alert-info text-center">
+                    <i class="bi bi-info-circle me-2"></i>
+                    No CVSS score data available
+                </div>
+            `;
+        }
+    }
+    
+    function displayMarkdownReport(markdownContent) {
+        // Hide summary section
+        document.getElementById('reportSummary').style.display = 'none';
+        document.getElementById('visualizationDashboard').style.display = 'none';
+        
+        // If we get a string, use it directly
+        let content = typeof markdownContent === 'string' ? markdownContent : '';
+        
+        // If we get an object with markdown_content property, use that
+        if (!content && markdownContent && markdownContent.markdown_content) {
+            content = markdownContent.markdown_content;
+        }
+        
+        // If we still don't have content, try to extract it from the object
+        if (!content && typeof markdownContent === 'object') {
+            content = JSON.stringify(markdownContent, null, 2);
+        }
+        
+        // Set markdown content
+        const markdownElement = document.getElementById('markdownContent');
+        
+        // Use the marked library to render markdown to HTML
+        if (window.marked) {
+            // Configure marked to handle GFM (GitHub Flavored Markdown)
+            marked.setOptions({
+                breaks: true,
+                gfm: true
+            });
+            
+            markdownElement.innerHTML = marked.parse(content);
+        } else {
+            // Fallback if marked library isn't loaded
+            markdownElement.innerHTML = `<pre>${escapeHtml(content)}</pre>`;
+        }
+        
+        // Show the markdown container
+        document.getElementById('markdownReport').style.display = 'block';
+    }
+    
+    function generateVulnerabilityGroup(severityName, colorClass, vulnerabilities) {
+        if (!vulnerabilities || vulnerabilities.length === 0) return '';
+        
+        let html = `
+            <div class="card mb-4">
+                <div class="card-header bg-${colorClass} text-white">
+                    <h5 class="card-title mb-0">${severityName} Severity Vulnerabilities (${vulnerabilities.length})</h5>
+                </div>
+                <div class="card-body">
+        `;
+        
+        vulnerabilities.forEach(vuln => {
+            const vulnName = vuln.name || vuln.type || 'Unknown Vulnerability';
+            const vulnLocation = vuln.location || '';
+            const vulnDescription = vuln.description || '';
+            const vulnRemediation = vuln.remediation || '';
+            const vulnParameter = vuln.parameter || '';
+            const vulnCvss = vuln.cvss_score || '';
+            
+            html += `
+                <div class="vulnerability-item mb-4">
+                    <h5 class="vuln-title">
+                        <span class="badge bg-${colorClass} me-2">${severityName}</span>
+                        ${escapeHtml(vulnName)}
+                        ${vulnCvss ? `<span class="badge bg-secondary float-end">CVSS: ${vulnCvss}</span>` : ''}
+                    </h5>
+                    ${vulnLocation ? `<div class="vuln-location"><strong>Location:</strong> ${escapeHtml(vulnLocation)}</div>` : ''}
+                    ${vulnParameter ? `<div class="vuln-parameter"><strong>Parameter:</strong> ${escapeHtml(vulnParameter)}</div>` : ''}
+                    ${vulnDescription ? `<div class="vuln-description"><strong>Description:</strong> ${escapeHtml(vulnDescription)}</div>` : ''}
+                    ${vulnRemediation ? `
+                        <div class="vuln-remediation mt-2">
+                            <strong>Remediation:</strong>
+                            <p>${escapeHtml(vulnRemediation)}</p>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        });
+        
+        html += `
                 </div>
             </div>
         `;
         
-        // No vulnerabilities found
-        if (totalVulns === 0) {
-            document.getElementById('vulnerabilities').innerHTML = `
-                <div class="alert alert-success">
-                    <i class="bi bi-check-circle me-2"></i> No vulnerabilities were found in this scan!
-                </div>
-            `;
-            return;
-        }
-        
-        // Create vulnerabilities list
-        const vulnContainer = document.getElementById('vulnerabilities');
-        vulnContainer.innerHTML = '';
-        
-        // Display each vulnerability by category
-        for (const category in data) {
-            if (category === 'metadata' || category === 'summary') continue;
-            
-            const categoryIssues = data[category];
-            if (!Array.isArray(categoryIssues) || categoryIssues.length === 0) continue;
-            
-            // Add category header
-            const categoryTitle = document.createElement('h4');
-            categoryTitle.className = 'mt-4 mb-3';
-            categoryTitle.textContent = formatCategoryName(category);
-            vulnContainer.appendChild(categoryTitle);
-            
-            // Add each vulnerability in the category
-            categoryIssues.forEach(vuln => {
-                const vulnItem = document.createElement('div');
-                vulnItem.className = 'vulnerability-item';
-                
-                // Create severity badge
-                const severityClass = getSeverityClass(vuln.severity);
-                const severityBadge = `<span class="badge ${severityClass}">${vuln.severity ? vuln.severity.toUpperCase() : 'INFO'}</span>`;
-                
-                vulnItem.innerHTML = `
-                    <div class="vulnerability-header">
-                        <h5 class="vulnerability-title">${vuln.name || 'Unnamed Vulnerability'}</h5>
-                        ${severityBadge}
-                    </div>
-                    <p class="vulnerability-description">${vuln.description || 'No description provided'}</p>
-                    ${vuln.details ? `
-                        <div class="vulnerability-details">
-                            ${formatDetails(vuln.details)}
-                        </div>
-                    ` : ''}
-                    ${vuln.affected_urls && vuln.affected_urls.length > 0 ? `
-                        <div class="mt-3">
-                            <h6>Affected URLs:</h6>
-                            <ul>
-                                ${vuln.affected_urls.map(url => `<li><code>${url}</code></li>`).join('')}
-                            </ul>
-                        </div>
-                    ` : ''}
-                    ${vuln.remediation ? `
-                        <div class="mt-3">
-                            <h6>Remediation:</h6>
-                            <p>${vuln.remediation}</p>
-                        </div>
-                    ` : ''}
-                `;
-                
-                vulnContainer.appendChild(vulnItem);
-            });
-        }
+        return html;
     }
     
-    function formatCategoryName(category) {
-        return category
-            .split('_')
-            .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-            .join(' ');
+    function getPercentage(count, total) {
+        if (total === 0) return 0;
+        return (count / total) * 100;
     }
     
-    function getSeverityClass(severity) {
-        switch (severity?.toLowerCase()) {
-            case 'high': return 'risk-high';
-            case 'medium': return 'risk-medium';
-            case 'low': return 'risk-low';
-            default: return 'risk-info';
-        }
-    }
-    
-    function formatDetails(details) {
-        // If details is a string, return it with line breaks converted to <br>
-        if (typeof details === 'string') {
-            return details.replace(/\n/g, '<br>');
-        }
-        
-        // If details is an object, format as JSON
-        return `<pre>${JSON.stringify(details, null, 2)}</pre>`;
+    function escapeHtml(unsafe) {
+        if (typeof unsafe !== 'string') return unsafe;
+        return unsafe
+             .replace(/&/g, "&amp;")
+             .replace(/</g, "&lt;")
+             .replace(/>/g, "&gt;")
+             .replace(/"/g, "&quot;")
+             .replace(/'/g, "&#039;");
     }
 </script>
+<style>
+    .markdown-content {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        line-height: 1.6;
+        color: #333;
+    }
+    
+    .markdown-content h1, 
+    .markdown-content h2, 
+    .markdown-content h3, 
+    .markdown-content h4, 
+    .markdown-content h5, 
+    .markdown-content h6 {
+        margin-top: 24px;
+        margin-bottom: 16px;
+        font-weight: 600;
+        line-height: 1.25;
+    }
+    
+    .markdown-content h1 {
+        font-size: 2em;
+        border-bottom: 1px solid #eaecef;
+        padding-bottom: .3em;
+    }
+    
+    .markdown-content h2 {
+        font-size: 1.5em;
+        border-bottom: 1px solid #eaecef;
+        padding-bottom: .3em;
+    }
+    
+    .markdown-content table {
+        display: block;
+        width: 100%;
+        overflow: auto;
+        border-spacing: 0;
+        border-collapse: collapse;
+        margin-top: 16px;
+        margin-bottom: 16px;
+    }
+    
+    .markdown-content table tr {
+        background-color: #fff;
+        border-top: 1px solid #c6cbd1;
+    }
+    
+    .markdown-content table tr:nth-child(2n) {
+        background-color: #f6f8fa;
+    }
+    
+    .markdown-content table th, 
+    .markdown-content table td {
+        padding: 6px 13px;
+        border: 1px solid #dfe2e5;
+    }
+    
+    .markdown-content table th {
+        font-weight: 600;
+    }
+    
+    .markdown-content pre {
+        background-color: #f6f8fa;
+        border-radius: 3px;
+        padding: 16px;
+        overflow: auto;
+    }
+    
+    .markdown-content code {
+        background-color: rgba(27,31,35,.05);
+        border-radius: 3px;
+        padding: .2em .4em;
+        font-family: SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+    }
+    
+    .markdown-content pre code {
+        background-color: transparent;
+        padding: 0;
+    }
+    
+    /* Chart container styling */
+    .chart-container {
+        position: relative;
+        height: 100%;
+        width: 100%;
+    }
+    
+    /* Dashboard card styling */
+    .card-header h6 {
+        font-weight: 600;
+    }
+    
+    /* Badge styling for CVSS scores */
+    .badge.cvss-badge {
+        min-width: 60px;
+    }
+</style>
 {% endblock %} 

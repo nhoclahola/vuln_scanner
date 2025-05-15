@@ -1,48 +1,13 @@
 [
   {
-    "id": "1747062578",
-    "url": "http://testphp.vulnweb.com/",
-    "type": "basic",
-    "time": "2025-05-12 22:09:38",
-    "duration": "N/A",
-    "report_file": "Report saved to file: report_http_testphp_vulnweb_com__vulnerability_report.json (JSON) and report_http_testphp_vulnweb_com__vulnerability_report.txt (Text)"
-  },
-  {
-    "id": "1747100030",
-    "url": "http://testphp.vulnweb.com/",
-    "type": "basic",
-    "time": "2025-05-13 08:33:50",
-    "duration": "N/A",
-    "report_file": "Report saved to file: report_http_testphp_vulnweb_com__vulnerability_report.json (JSON) and report_http_testphp_vulnweb_com__vulnerability_report.txt (Text)"
-  },
-  {
-    "id": "1747101712",
+    "id": "1747267269",
+    "db_id": 1,
     "target_url": "http://testphp.vulnweb.com/",
     "scan_type": "basic",
-    "timestamp": 1747101712,
-    "duration": 0,
-    "vulnerabilities": 0,
-    "status": "error",
-    "error": "'str' object has no attribute 'items'"
-  },
-  {
-    "id": "1747102603",
-    "target_url": "http://testphp.vulnweb.com/",
-    "scan_type": "basic",
-    "timestamp": 1747102603,
-    "duration": 364.84,
-    "vulnerabilities": 0,
-    "report_file": "report_http_testphp.vulnweb.com__1747102968.txt",
-    "status": "completed"
-  },
-  {
-    "id": "1747104407",
-    "target_url": "http://testphp.vulnweb.com/",
-    "scan_type": "basic",
-    "timestamp": 1747104407,
-    "duration": 373.79,
-    "vulnerabilities": 0,
-    "report_file": "report_http_testphp.vulnweb.com__1747104780.txt",
-    "status": "completed"
+    "timestamp": 1747267269,
+    "duration": 387.19,
+    "status": "completed",
+    "report_json_path": "scan_reports\\report_testphp.vulnweb.com_20250515_070736_vulnerability.json",
+    "report_md_path": "scan_reports\\report_testphp.vulnweb.com_20250515_070736_vulnerability.md"
   }
 ]

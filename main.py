@@ -70,7 +70,8 @@ def init_db():
             scan_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
             status TEXT, 
             report_json_path TEXT,
-            report_md_path TEXT 
+            report_md_path TEXT,
+            end_time DATETIME
         )
     """)
     conn.commit()
@@ -97,7 +98,7 @@ def log_scan_end(scan_id, status, report_json_path=None, report_md_path=None):
     cursor = conn.cursor()
     cursor.execute("""
         UPDATE scans
-        SET status = ?, report_json_path = ?, report_md_path = ?
+        SET status = ?, report_json_path = ?, report_md_path = ?, end_time = datetime('now')
         WHERE id = ?
     """, (status, report_json_path, report_md_path, scan_id))
     conn.commit()

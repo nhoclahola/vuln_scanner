@@ -5,8 +5,10 @@ import threading
 import time
 import queue
 import logging
+import sqlite3
 from datetime import datetime
 from flask import Flask, render_template, request, jsonify, redirect, url_for, Response, stream_with_context
+import re
 
 # Thiết lập logging
 logging.basicConfig(
@@ -20,7 +22,7 @@ logging.basicConfig(
 logger = logging.getLogger('vuln_scanner_web')
 
 # Import hàm scan_website từ main.py
-from main import scan_website, save_report_to_file, format_vulnerability_report
+from main import scan_website, format_vulnerability_report, init_db, log_scan_start, log_scan_end, DB_NAME
 
 app = Flask(__name__, 
             static_folder='web/static',
@@ -30,6 +32,103 @@ app = Flask(__name__,
 output_queue = queue.Queue()
 current_scans = {}
 scan_history = []
+
+# Hàm tương tác với SQLite database
+def get_scan_history_from_db():
+    """Lấy lịch sử quét từ database SQLite"""
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        conn.row_factory = sqlite3.Row  # Để kết quả trả về dạng dict
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, target_url, scan_type, scan_timestamp, status, 
+                   report_json_path, report_md_path, end_time
+            FROM scans
+            ORDER BY scan_timestamp DESC
+        """)
+        rows = cursor.fetchall()
+        conn.close()
+        
+        # Chuyển đổi rows thành list of dict
+        history = []
+        for row in rows:
+            item = dict(row)
+            
+            # Tính thời gian quét từ scan_timestamp và end_time
+            if item['scan_timestamp'] and item['end_time']:
+                try:
+                    # Chuyển đổi chuỗi thành đối tượng datetime
+                    start_time = datetime.strptime(item['scan_timestamp'], "%Y-%m-%d %H:%M:%S")
+                    end_time = datetime.strptime(item['end_time'], "%Y-%m-%d %H:%M:%S")
+                    
+                    # Tính thời gian quét (giây)
+                    scan_duration = (end_time - start_time).total_seconds()
+                    item['duration'] = round(scan_duration, 2)
+                except Exception as e:
+                    logger.error(f"Error calculating scan duration: {str(e)}")
+                    item['duration'] = 0
+            else:
+                item['duration'] = 0
+            
+            # Thêm thông tin về số lượng lỗ hổng từ file report nếu có
+            if item['report_json_path'] and os.path.exists(item['report_json_path']):
+                try:
+                    with open(item['report_json_path'], 'r', encoding='utf-8') as f:
+                        report_data = json.load(f)
+                        # Lấy số lượng lỗ hổng từ summary nếu có
+                        if 'summary' in report_data and 'total_vulnerabilities' in report_data['summary']:
+                            item['vulnerabilities'] = report_data['summary']['total_vulnerabilities']
+                        elif 'vulnerabilities' in report_data and isinstance(report_data['vulnerabilities'], list):
+                            item['vulnerabilities'] = len(report_data['vulnerabilities'])
+                except Exception as e:
+                    logger.error(f"Error reading report file {item['report_json_path']}: {str(e)}")
+            
+            history.append(item)
+            
+        return history
+    except Exception as e:
+        logger.error(f"Error fetching scan history from DB: {str(e)}")
+        return []
+
+def get_scan_details_from_db(scan_id):
+    """Lấy chi tiết của một lần quét từ database SQLite"""
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT id, target_url, scan_type, scan_timestamp, status, 
+                   report_json_path, report_md_path, end_time
+            FROM scans
+            WHERE id = ?
+        """, (scan_id,))
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            scan_details = dict(row)
+            
+            # Tính thời gian quét từ scan_timestamp và end_time
+            if scan_details['scan_timestamp'] and scan_details['end_time']:
+                try:
+                    # Chuyển đổi chuỗi thành đối tượng datetime
+                    start_time = datetime.strptime(scan_details['scan_timestamp'], "%Y-%m-%d %H:%M:%S")
+                    end_time = datetime.strptime(scan_details['end_time'], "%Y-%m-%d %H:%M:%S")
+                    
+                    # Tính thời gian quét (giây)
+                    scan_duration = (end_time - start_time).total_seconds()
+                    scan_details['duration'] = round(scan_duration, 2)
+                except Exception as e:
+                    logger.error(f"Error calculating scan duration: {str(e)}")
+                    scan_details['duration'] = 0
+            else:
+                scan_details['duration'] = 0
+                
+            return scan_details
+        return None
+    except Exception as e:
+        logger.error(f"Error fetching scan details from DB: {str(e)}")
+        return None
 
 class ThreadedScan:
     def __init__(self, scan_id, target_url, use_deepseek, scan_type):
@@ -44,6 +143,7 @@ class ThreadedScan:
         self.end_time = None
         self.progress = 0
         self.report_file = None
+        self.db_scan_id = None  # Lưu ID của bản ghi trong database
         
     def run(self):
         self.status = "running"
@@ -54,84 +154,69 @@ class ThreadedScan:
             sys.stdout = OutputCapture(self)
             sys.stderr = OutputCapture(self)
             
+            # Ghi lại thông tin quét vào database
+            self.db_scan_id = log_scan_start(self.target_url, self.scan_type)
+            
             # Run the scan
             logger.info(f"Starting scan for {self.target_url}")
-            result = scan_website(self.target_url, self.use_deepseek, self.scan_type)
-            self.result = result
+            status_message, json_report_path, md_report_path = scan_website(
+                self.target_url, 
+                self.use_deepseek, 
+                self.scan_type,
+                current_scan_id=self.db_scan_id
+            )
+            
+            self.result = status_message
             self.status = "completed"
             
-            # Count vulnerabilities
-            vulnerabilities_count = 0
-            if result:
-                # Kiểm tra xem result có phải là dict không trước khi sử dụng .items()
-                if isinstance(result, dict):
-                    # Count all vulnerabilities by category
-                    for category, vulns in result.items():
-                        if category not in ['metadata', 'summary'] and isinstance(vulns, list):
-                            vulnerabilities_count += len(vulns)
-                elif isinstance(result, str):
-                    # Nếu result là string, có thể là thông báo lỗ hổng hoặc thông báo khác
-                    logger.info(f"Scan result is a string: {result}")
-                    # Không tính là lỗ hổng
-                    vulnerabilities_count = 0
-                else:
-                    # Kiểu dữ liệu khác
-                    logger.info(f"Scan result has unexpected type: {type(result)}")
-                    vulnerabilities_count = 0
+            # Lưu đường dẫn đến báo cáo
+            self.report_file = {
+                "json": json_report_path,
+                "markdown": md_report_path
+            }
             
-            # Save report to file
-            if result:
-                logger.info("Saving report to file")
-                
-                # Nếu result là dict, lưu dưới dạng JSON, nếu không thì lưu dưới dạng text
-                if isinstance(result, dict):
-                    report_info = save_report_to_file(result, self.target_url, "vulnerability_report.json")
-                else:
-                    # Lưu kết quả dạng text nếu không phải là dict
-                    report_filename = f"report_{self.target_url.replace('://', '_').replace('/', '_').replace(':', '_')}_{int(time.time())}.txt"
-                    with open(report_filename, 'w', encoding='utf-8') as f:
-                        f.write(str(result))
-                    report_info = report_filename
-                
-                self.report_file = report_info
-                
-                # Calculate duration
-                duration = (self.end_time or datetime.now()) - self.start_time
-                duration_seconds = duration.total_seconds()
-                
-                # Add to scan history with more details
-                scan_record = {
-                    "id": self.scan_id,
-                    "target_url": self.target_url,
-                    "scan_type": self.scan_type,
-                    "timestamp": int(time.mktime(self.start_time.timetuple())),
-                    "duration": round(duration_seconds, 2),
-                    "vulnerabilities": vulnerabilities_count,
-                    "report_file": report_info,
-                    "status": "completed"
-                }
-                scan_history.append(scan_record)
-                
-                # Save scan history to file
-                try:
-                    with open('scan_history.json', 'w') as f:
-                        json.dump(scan_history, f, indent=2)
-                except Exception as e:
-                    logger.error(f"Error saving scan history: {str(e)}")
+            # Calculate duration
+            duration = (self.end_time or datetime.now()) - self.start_time
+            duration_seconds = duration.total_seconds()
+            
+            # Thêm vào scan_history (cho khả năng tương thích ngược)
+            scan_record = {
+                "id": self.scan_id,
+                "db_id": self.db_scan_id,
+                "target_url": self.target_url,
+                "scan_type": self.scan_type,
+                "timestamp": int(time.mktime(self.start_time.timetuple())),
+                "duration": round(duration_seconds, 2),
+                "status": "completed",
+                "report_json_path": json_report_path,
+                "report_md_path": md_report_path
+            }
+            scan_history.append(scan_record)
+            
+            # Save scan history to file (cho khả năng tương thích ngược)
+            try:
+                with open('scan_history.json', 'w') as f:
+                    json.dump(scan_history, f, indent=2)
+            except Exception as e:
+                logger.error(f"Error saving scan history: {str(e)}")
             
         except Exception as e:
             logger.error(f"Error in scan: {str(e)}")
             self.status = "error"
             self.result = {"error": str(e)}
             
+            # Cập nhật trạng thái trong database
+            if self.db_scan_id:
+                log_scan_end(self.db_scan_id, "Error")
+            
             # Add error entry to scan history
             scan_record = {
                 "id": self.scan_id,
+                "db_id": self.db_scan_id,
                 "target_url": self.target_url,
                 "scan_type": self.scan_type,
                 "timestamp": int(time.mktime(self.start_time.timetuple())),
                 "duration": 0,
-                "vulnerabilities": 0,
                 "status": "error",
                 "error": str(e)
             }
@@ -140,7 +225,7 @@ class ThreadedScan:
             # Try to save scan history
             try:
                 with open('scan_history.json', 'w') as f:
-                    json.dump(scan_history, f, indent=2)
+                    json.dump(scan_history, f)
             except Exception as ex:
                 logger.error(f"Error saving scan history after error: {str(ex)}")
                 
@@ -237,13 +322,42 @@ def scan_status(scan_id):
         elapsed = (scan.end_time if scan.end_time else datetime.now()) - scan.start_time
         elapsed_str = str(elapsed).split('.')[0]  # Remove microseconds
         
+        # Nếu có db_scan_id, lấy thêm thông tin từ database
+        db_scan_details = None
+        if hasattr(scan, 'db_scan_id') and scan.db_scan_id:
+            db_scan_details = get_scan_details_from_db(scan.db_scan_id)
+        
+        report_json = None
+        report_md = None
+        
+        # Ưu tiên lấy từ scan object trước
+        if scan.report_file and isinstance(scan.report_file, dict):
+            report_json = scan.report_file.get('json')
+            report_md = scan.report_file.get('markdown')
+        elif scan.report_file and isinstance(scan.report_file, str):
+            # Tương thích ngược với code cũ
+            report_json = scan.report_file
+        
+        # Nếu không có từ scan object, thử lấy từ database
+        if db_scan_details:
+            if not report_json and db_scan_details.get('report_json_path'):
+                report_json = db_scan_details.get('report_json_path')
+            if not report_md and db_scan_details.get('report_md_path'):
+                report_md = db_scan_details.get('report_md_path')
+                
+            # Nếu scan đã hoàn thành, lấy thời gian quét đã tính toán từ database
+            if scan.status == "completed" and db_scan_details.get('duration'):
+                elapsed_str = f"{db_scan_details.get('duration')} seconds"
+        
         return jsonify({
             "scan_id": scan_id,
+            "db_scan_id": scan.db_scan_id if hasattr(scan, 'db_scan_id') else None,
             "status": scan.status,
             "target_url": scan.target_url,
             "progress": scan.progress,
             "elapsed_time": elapsed_str,
-            "report_file": scan.report_file
+            "report_json_path": report_json,
+            "report_md_path": report_md
         })
     
     return jsonify({"error": "Scan not found"}), 404
@@ -264,20 +378,63 @@ def scan_result(scan_id):
         scan = current_scans[scan_id]
         
         if scan.status == "completed":
-            # Format the result if needed
-            if isinstance(scan.result, dict):
-                formatted_result = format_vulnerability_report(scan.result)
-            else:
-                # Nếu kết quả không phải là dict, trả về dưới dạng text
-                formatted_result = {
-                    "text_result": str(scan.result),
-                    "type": "text"
-                }
-                
+            # Lấy thông tin báo cáo
+            report_json = None
+            report_md = None
+            
+            # Ưu tiên lấy từ scan object
+            if scan.report_file and isinstance(scan.report_file, dict):
+                report_json = scan.report_file.get('json')
+                report_md = scan.report_file.get('markdown')
+            elif scan.report_file and isinstance(scan.report_file, str):
+                # Tương thích ngược với code cũ
+                report_json = scan.report_file
+            
+            # Nếu có db_scan_id, kiểm tra thông tin từ database
+            if hasattr(scan, 'db_scan_id') and scan.db_scan_id:
+                db_scan_details = get_scan_details_from_db(scan.db_scan_id)
+                if db_scan_details:
+                    if not report_json and db_scan_details.get('report_json_path'):
+                        report_json = db_scan_details.get('report_json_path')
+                    if not report_md and db_scan_details.get('report_md_path'):
+                        report_md = db_scan_details.get('report_md_path')
+            
+            # Đọc nội dung báo cáo từ file
+            formatted_result = None
+            if report_json and os.path.exists(report_json):
+                try:
+                    with open(report_json, 'r', encoding='utf-8') as f:
+                        report_content = json.load(f)
+                        formatted_result = report_content
+                except Exception as e:
+                    logger.error(f"Error reading JSON report {report_json}: {str(e)}")
+            
+            if not formatted_result and report_md and os.path.exists(report_md):
+                try:
+                    with open(report_md, 'r', encoding='utf-8') as f:
+                        report_content = f.read()
+                        formatted_result = {
+                            "markdown_content": report_content,
+                            "type": "markdown"
+                        }
+                except Exception as e:
+                    logger.error(f"Error reading MD report {report_md}: {str(e)}")
+            
+            # Nếu không đọc được file báo cáo, dùng kết quả từ scan.result
+            if not formatted_result:
+                if isinstance(scan.result, dict):
+                    formatted_result = scan.result
+                else:
+                    formatted_result = {
+                        "text_result": str(scan.result),
+                        "type": "text"
+                    }
+            
             return jsonify({
                 "status": "completed", 
                 "result": formatted_result,
-                "report_file": scan.report_file
+                "report_json_path": report_json,
+                "report_md_path": report_md
             })
         
         return jsonify({"status": scan.status})
@@ -312,60 +469,165 @@ def history_page():
 # API lấy lịch sử quét
 @app.route('/api/history')
 def get_scan_history():
-    history_data = []
+    # Chỉ lấy từ database SQLite
+    db_history = get_scan_history_from_db()
     
-    # Nếu file lịch sử tồn tại, đọc từ đó
-    if os.path.exists('scan_history.json'):
-        try:
-            with open('scan_history.json', 'r') as f:
-                history_data = json.load(f)
-        except Exception as e:
-            logger.error(f"Error loading scan history: {str(e)}")
-            # Nếu không đọc được file, dùng biến toàn cục
-            history_data = scan_history
-    else:
-        # Nếu không có file, dùng biến toàn cục
-        history_data = scan_history
+    if db_history:
+        # Format history data from database
+        history_data = []
+        for item in db_history:
+            try:
+                # Kiểm tra và chuyển đổi scan_timestamp thành định dạng ngày giờ phù hợp
+                scan_date = None
+                if item['scan_timestamp']:
+                    if isinstance(item['scan_timestamp'], str):
+                        try:
+                            scan_date = datetime.strptime(item['scan_timestamp'], "%Y-%m-%d %H:%M:%S")
+                        except ValueError:
+                            # Thử các định dạng ngày giờ khác nếu cần
+                            scan_date = datetime.fromtimestamp(float(item['scan_timestamp']))
+                    else:
+                        scan_date = datetime.fromtimestamp(item['scan_timestamp'])
+                
+                if not scan_date:
+                    scan_date = datetime.now()
+                
+                # Tạo mục lịch sử với các trường chuẩn
+                history_item = {
+                    "id": item['id'],
+                    "target_url": item['target_url'],
+                    "scan_type": item['scan_type'] or 'basic',
+                    "timestamp": int(scan_date.timestamp()),
+                    "status": item['status'] or 'Unknown',
+                    "report_json_path": item['report_json_path'],
+                    "report_md_path": item['report_md_path'],
+                    "date": scan_date.strftime("%Y-%m-%d %H:%M:%S"),
+                    "duration": item.get('duration', 'N/A'),  # Lấy duration từ bản ghi cơ sở dữ liệu
+                    "vulnerabilities": item.get('vulnerabilities', 0)  # Lấy từ item nếu có
+                }
+                
+                # Nếu không có thông tin vulnerabilities, thử đọc từ file báo cáo
+                if history_item['vulnerabilities'] == 0 and history_item['report_json_path'] and os.path.exists(history_item['report_json_path']):
+                    try:
+                        with open(history_item['report_json_path'], 'r', encoding='utf-8') as f:
+                            report_data = json.load(f)
+                            if 'summary' in report_data and 'total_vulnerabilities' in report_data['summary']:
+                                history_item['vulnerabilities'] = report_data['summary']['total_vulnerabilities']
+                            elif 'vulnerabilities' in report_data and isinstance(report_data['vulnerabilities'], list):
+                                history_item['vulnerabilities'] = len(report_data['vulnerabilities'])
+                    except Exception as e:
+                        logger.error(f"Error reading report vulnerabilities: {str(e)}")
+                
+                # Kiểm tra nếu file báo cáo tồn tại
+                if history_item['report_json_path'] and not os.path.exists(history_item['report_json_path']):
+                    history_item['report_json_path'] = None
+                
+                if history_item['report_md_path'] and not os.path.exists(history_item['report_md_path']):
+                    history_item['report_md_path'] = None
+                
+                history_data.append(history_item)
+            except Exception as e:
+                logger.error(f"Error formatting history item: {str(e)}")
+                # Vẫn thêm vào danh sách nhưng với dữ liệu tối thiểu
+                history_data.append({
+                    "id": item.get('id', 0),
+                    "target_url": item.get('target_url', 'Unknown'),
+                    "scan_type": item.get('scan_type', 'basic'),
+                    "timestamp": int(time.time()),
+                    "status": "Error",
+                    "duration": "N/A",
+                    "vulnerabilities": 0
+                })
+        
+        return jsonify(history_data)
     
-    # Đảm bảo mọi mục đều có các trường cần thiết
-    for item in history_data:
-        # Đảm bảo các trường cơ bản tồn tại
-        if 'target_url' not in item:
-            item['target_url'] = 'unknown'
-        if 'timestamp' not in item:
-            # Sử dụng thời gian hiện tại nếu không có timestamp
-            item['timestamp'] = int(time.time())
-        if 'scan_type' not in item:
-            item['scan_type'] = 'Basic'
-        if 'vulnerabilities' not in item:
-            item['vulnerabilities'] = 0
-    
-    # Sắp xếp theo thời gian mới nhất trước
-    history_data.sort(key=lambda x: x.get('timestamp', 0), reverse=True)
-    
-    return jsonify(history_data)
+    # Trả về danh sách rỗng nếu không có dữ liệu
+    return jsonify([])
 
 # API liệt kê báo cáo
 @app.route('/api/reports')
 def list_reports():
-    """List all available scan reports"""
+    """List all available scan reports from database and scan_reports directory"""
     reports = []
-    for filename in os.listdir('.'):
-        if filename.startswith('report_') and filename.endswith('.json'):
-            # Extract target URL from filename
-            parts = filename.split('_')
-            target_url = parts[1] if len(parts) > 1 else "unknown"
+    
+    # Lấy báo cáo từ database
+    db_history = get_scan_history_from_db()
+    for item in db_history:
+        if item['report_json_path'] or item['report_md_path']:
+            json_path = item['report_json_path']
+            md_path = item['report_md_path']
             
-            # Get report creation time
-            timestamp = os.path.getmtime(filename)
-            created = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+            # Kiểm tra tệp có tồn tại không
+            json_exists = json_path and os.path.exists(json_path)
+            md_exists = md_path and os.path.exists(md_path)
             
-            reports.append({
-                "filename": filename,
-                "target_url": target_url,
-                "created": created,
-                "txt_available": filename.replace('.json', '.txt') in os.listdir('.')
-            })
+            if json_exists or md_exists:
+                # Lấy thời gian tạo từ timestamp hoặc thời gian sửa đổi tệp
+                if isinstance(item['scan_timestamp'], str):
+                    created = item['scan_timestamp']
+                else:
+                    try:
+                        created = datetime.fromtimestamp(item['scan_timestamp']).strftime('%Y-%m-%d %H:%M:%S')
+                    except:
+                        # Nếu timestamp không hợp lệ, lấy thời gian sửa đổi tệp
+                        json_time = os.path.getmtime(json_path) if json_exists else 0
+                        md_time = os.path.getmtime(md_path) if md_exists else 0
+                        timestamp = max(json_time, md_time)
+                        created = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+                
+                reports.append({
+                    "db_id": item['id'],
+                    "target_url": item['target_url'],
+                    "scan_type": item['scan_type'],
+                    "created": created,
+                    "json_path": json_path if json_exists else None,
+                    "md_path": md_path if md_exists else None
+                })
+    
+    # Kiểm tra thư mục scan_reports để tìm báo cáo bổ sung
+    if os.path.exists('scan_reports'):
+        for filename in os.listdir('scan_reports'):
+            filepath = os.path.join('scan_reports', filename)
+            
+            # Kiểm tra xem báo cáo đã được thêm vào danh sách chưa
+            already_added = False
+            for report in reports:
+                if ((report.get('json_path') == filepath) or 
+                    (report.get('md_path') == filepath)):
+                    already_added = True
+                    break
+            
+            if not already_added and (filename.endswith('.json') or filename.endswith('.md')):
+                # Trích xuất thông tin từ tên tệp
+                parts = filename.split('_')
+                if len(parts) >= 2:
+                    # Định dạng mới: report_domain_timestamp_vulnerability.json
+                    target_url = parts[1]
+                    
+                    # Lấy thời gian tạo từ tệp
+                    timestamp = os.path.getmtime(filepath)
+                    created = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+                    
+                    # Thêm vào danh sách báo cáo
+                    if filename.endswith('.json'):
+                        md_file = filepath.replace('.json', '.md')
+                        has_md = os.path.exists(md_file)
+                        reports.append({
+                            "target_url": target_url,
+                            "created": created,
+                            "json_path": filepath,
+                            "md_path": md_file if has_md else None
+                        })
+                    elif filename.endswith('.md'):
+                        json_file = filepath.replace('.md', '.json')
+                        # Chỉ thêm file .md nếu không có file .json tương ứng
+                        if not os.path.exists(json_file):
+                            reports.append({
+                                "target_url": target_url,
+                                "created": created,
+                                "json_path": None,
+                                "md_path": filepath
+                            })
     
     # Sort by newest first
     reports.sort(key=lambda x: x["created"], reverse=True)
@@ -388,6 +650,9 @@ def get_report(filename):
                 except json.JSONDecodeError as e:
                     logger.error(f"Error decoding JSON: {str(e)}")
                     return jsonify({"content": content, "type": "text", "error": "Invalid JSON format"})
+            elif filename.endswith('.md'):
+                # Markdown file
+                return jsonify({"content": content, "type": "markdown"})
             else:
                 # Đây là file text
                 return jsonify({"content": {"text_result": content, "type": "text"}})
@@ -418,7 +683,7 @@ def delete_report(filename):
             # Save updated history
             try:
                 with open('scan_history.json', 'w') as f:
-                    json.dump(scan_history, f)
+                    json.dump(scan_history, f, indent=2)
             except Exception as e:
                 logger.error(f"Error saving scan history after deletion: {str(e)}")
             
@@ -443,23 +708,75 @@ def settings_page():
 def page_not_found(e):
     return render_template('404.html'), 404
 
-# Load scan history from file if exists
 def load_scan_history():
+    """Không sử dụng file scan_history.json nữa, biến này chỉ có mặt để tránh lỗi khi tham chiếu đến nó"""
     global scan_history
-    if os.path.exists('scan_history.json'):
-        try:
-            with open('scan_history.json', 'r') as f:
-                scan_history = json.load(f)
-        except Exception as e:
-            logger.error(f"Error loading scan history: {str(e)}")
+    scan_history = []  # Luôn để mảng rỗng vì không còn dùng file scan_history.json
+
+# API để lấy kết quả quét từ ID trong database
+@app.route('/api/db/scan/<int:db_id>')
+def get_scan_by_db_id(db_id):
+    """Get scan details by database ID"""
+    try:
+        scan_details = get_scan_details_from_db(db_id)
+        
+        if scan_details:
+            # Format response
+            json_path = scan_details.get('report_json_path')
+            md_path = scan_details.get('report_md_path')
+            
+            # Kiểm tra tệp có tồn tại không
+            json_exists = json_path and os.path.exists(json_path)
+            md_exists = md_path and os.path.exists(md_path)
+            
+            # Chuyển đổi timestamp thành định dạng dễ đọc
+            timestamp_display = scan_details.get('scan_timestamp', '')
+            timestamp_unix = 0
+            
+            if timestamp_display:
+                if isinstance(timestamp_display, str):
+                    try:
+                        # Chuyển từ string sang datetime rồi thành unix timestamp
+                        dt = datetime.strptime(timestamp_display, "%Y-%m-%d %H:%M:%S")
+                        timestamp_unix = int(dt.timestamp())
+                    except (ValueError, TypeError):
+                        # Nếu lỗi, để giá trị mặc định
+                        timestamp_unix = int(time.time())
+                else:
+                    # Nếu là số, giả định đó là unix timestamp
+                    timestamp_unix = int(timestamp_display)
+            
+            response = {
+                "id": scan_details['id'],
+                "target_url": scan_details.get('target_url', 'Unknown'),
+                "scan_type": scan_details.get('scan_type', 'basic'),
+                "status": scan_details.get('status', 'Unknown'),
+                "timestamp": timestamp_unix,
+                "timestamp_display": timestamp_display,
+                "report_json_path": json_path if json_exists else None,
+                "report_md_path": md_path if md_exists else None,
+                "duration": scan_details.get('duration', "N/A")  # Lấy thời gian quét từ chi tiết scan
+            }
+            
+            return jsonify(response)
+        
+        # Không tìm thấy trong cơ sở dữ liệu
+        return jsonify({"error": "Scan not found"}), 404
+    except Exception as e:
+        logger.error(f"Error in get_scan_by_db_id: {str(e)}", exc_info=True)
+        return jsonify({"error": f"Error getting scan details: {str(e)}"}), 500
 
 if __name__ == '__main__':
+    # Đảm bảo database đã được khởi tạo
+    init_db()
+    
     # Ensure required directories exist
     os.makedirs('web/static', exist_ok=True)
     os.makedirs('web/templates', exist_ok=True)
     os.makedirs('web/static/css', exist_ok=True)
     os.makedirs('web/static/js', exist_ok=True)
     os.makedirs('web/static/img', exist_ok=True)
+    os.makedirs('scan_reports', exist_ok=True)
     
     # Load scan history
     load_scan_history()

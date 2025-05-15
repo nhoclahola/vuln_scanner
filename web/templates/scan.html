@@ -1,107 +1,114 @@
 {% extends "base.html" %}
 
-{% block title %}New Scan - Security Scanner{% endblock %}
+{% block title %}New Scan - Vulnerability Scanner{% endblock %}
 
 {% block header_title %}New Vulnerability Scan{% endblock %}
 
 {% block content %}
-<div class="row">
-    <div class="col-lg-8 mx-auto">
-        <!-- Scan Form -->
-        <div id="scanFormContainer" class="scan-form">
-            <div class="alert alert-danger" id="scanError" style="display: none;"></div>
-            
-            <form id="scanForm">
-                <div class="mb-4">
-                    <label for="url" class="form-label">Target URL</label>
-                    <div class="input-group">
-                        <span class="input-group-text"><i class="bi bi-globe"></i></span>
-                        <input type="url" class="form-control" id="url" name="url" placeholder="https://example.com" required>
-                    </div>
-                    <div class="form-text">Enter the full URL of the website you want to scan (including http:// or https://)</div>
-                </div>
-                
-                <div class="row mb-4">
-                    <div class="col-md-6">
-                        <label class="form-label">Scan Type</label>
-                        <div class="form-check">
-                            <input class="form-check-input" type="radio" name="scan_type" id="basicScan" value="basic" checked>
-                            <label class="form-check-label" for="basicScan">
-                                Basic Scan (Faster)
-                            </label>
-                            <div class="form-text">Quick scan for common vulnerabilities</div>
-                        </div>
-                        <div class="form-check mt-2">
-                            <input class="form-check-input" type="radio" name="scan_type" id="comprehensiveScan" value="comprehensive">
-                            <label class="form-check-label" for="comprehensiveScan">
-                                Comprehensive Scan (Deeper)
-                            </label>
-                            <div class="form-text">Thorough scan with more test vectors</div>
-                        </div>
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label">LLM Provider</label>
-                        <div class="form-check">
-                            <input class="form-check-input" type="radio" name="llm_provider" id="deepseekProvider" value="deepseek" checked>
-                            <label class="form-check-label" for="deepseekProvider">
-                                DeepSeek
-                            </label>
-                        </div>
-                        <div class="form-check mt-2">
-                            <input class="form-check-input" type="radio" name="llm_provider" id="openaiProvider" value="openai">
-                            <label class="form-check-label" for="openaiProvider">
-                                OpenAI
-                            </label>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="d-grid gap-2">
-                    <button type="submit" class="btn btn-primary btn-lg">
-                        <i class="bi bi-shield-check me-2"></i> Start Scan
-                    </button>
-                </div>
-            </form>
-        </div>
-        
-        <!-- Scan Results (hidden until scan starts) -->
-        <div id="scanResults" class="scan-results" style="display: none;">
-            <div class="card mb-4">
+<div class="container">
+    <div class="row">
+        <div class="col-lg-8 mx-auto">
+            <!-- Scan Form -->
+            <div id="scanFormContainer" class="card mb-4">
                 <div class="card-header">
-                    <h5 class="card-title">Scan Progress</h5>
+                    <h5 class="mb-0">Scan Configuration</h5>
                 </div>
                 <div class="card-body">
-                    <div class="scan-progress">
-                        <div class="progress mb-3">
-                            <div id="scanProgress" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
+                    <div class="alert alert-danger" id="scanError" style="display: none;"></div>
+                    
+                    <form id="scanForm">
+                        <div class="mb-4">
+                            <label for="url" class="form-label">Target URL</label>
+                            <div class="input-group">
+                                <span class="input-group-text"><i class="bi bi-globe"></i></span>
+                                <input type="url" class="form-control" id="url" name="url" placeholder="https://example.com" required>
+                            </div>
+                            <div class="form-text">Enter the full URL of the website you want to scan (including http:// or https://)</div>
                         </div>
-                        <div class="d-flex justify-content-between">
-                            <span id="scanProgressText">0%</span>
-                            <a id="viewReportBtn" href="#" class="btn btn-sm btn-outline-primary" style="display: none;">View Full Report</a>
+                        
+                        <div class="row mb-4">
+                            <div class="col-md-6">
+                                <label class="form-label">Scan Type</label>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="scan_type" id="basicScan" value="basic" checked>
+                                    <label class="form-check-label" for="basicScan">
+                                        Basic Scan (Faster)
+                                    </label>
+                                    <div class="form-text">Quick scan for common vulnerabilities</div>
+                                </div>
+                                <div class="form-check mt-2">
+                                    <input class="form-check-input" type="radio" name="scan_type" id="fullScan" value="full">
+                                    <label class="form-check-label" for="fullScan">
+                                        Full Scan (Deeper)
+                                    </label>
+                                    <div class="form-text">Thorough scan with more test vectors</div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">LLM Provider</label>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="llm_provider" id="deepseekProvider" value="deepseek" checked>
+                                    <label class="form-check-label" for="deepseekProvider">
+                                        DeepSeek
+                                    </label>
+                                </div>
+                                <div class="form-check mt-2">
+                                    <input class="form-check-input" type="radio" name="llm_provider" id="openaiProvider" value="openai">
+                                    <label class="form-check-label" for="openaiProvider">
+                                        OpenAI
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="d-grid gap-2">
+                            <button type="submit" class="btn btn-primary btn-lg">
+                                <i class="bi bi-shield-check me-2"></i> Start Scan
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            
+            <!-- Scan Results (hidden until scan starts) -->
+            <div id="scanResults" style="display: none;">
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">Scan Progress</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="scan-progress">
+                            <div class="progress mb-3">
+                                <div id="scanProgress" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
+                            </div>
+                            <div class="d-flex justify-content-between">
+                                <span id="scanProgressText">0%</span>
+                                <a id="viewReportBtn" href="#" class="btn btn-sm btn-outline-primary" style="display: none;">View Full Report</a>
+                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
-            
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h5 class="card-title">Console Output</h5>
-                </div>
-                <div class="card-body p-0">
-                    <div id="consoleOutput" class="console-output">
-                        <!-- Console output will be added here -->
+                
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">Console Output</h5>
+                    </div>
+                    <div class="card-body p-0">
+                        <div id="consoleOutput" class="console-output">
+                            <!-- Console output will be added here -->
+                        </div>
                     </div>
                 </div>
-            </div>
-            
-            <div id="vulnerabilityResults">
-                <!-- Vulnerability results will be added here -->
-            </div>
-            
-            <div class="d-grid gap-2 mt-4">
-                <button type="button" class="btn btn-outline-primary" onclick="document.getElementById('scanFormContainer').style.display = 'block'; document.getElementById('scanResults').style.display = 'none';">
-                    <i class="bi bi-arrow-left me-2"></i> Back to Scan Form
-                </button>
+                
+                <div id="vulnerabilityResults">
+                    <!-- Vulnerability results will be added here -->
+                </div>
+                
+                <div class="d-grid gap-2 mt-4">
+                    <button type="button" class="btn btn-outline-primary" onclick="resetScanForm()">
+                        <i class="bi bi-arrow-left me-2"></i> Back to Scan Form
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -110,6 +117,204 @@
 
 {% block extra_js %}
 <script>
-    // Any scan-specific JavaScript initialization can go here
+    document.addEventListener('DOMContentLoaded', function() {
+        // Set up form submission handler
+        const scanForm = document.getElementById('scanForm');
+        if (scanForm) {
+            scanForm.addEventListener('submit', startScan);
+        }
+    });
+    
+    function startScan(event) {
+        event.preventDefault();
+        
+        // Hide any previous error messages
+        document.getElementById('scanError').style.display = 'none';
+        
+        // Get form data
+        const formData = new FormData(event.target);
+        const targetUrl = formData.get('url');
+        
+        if (!targetUrl) {
+            showError('Please enter a valid URL');
+            return;
+        }
+        
+        // Show scanning UI
+        document.getElementById('scanFormContainer').style.display = 'none';
+        document.getElementById('scanResults').style.display = 'block';
+        document.getElementById('consoleOutput').innerHTML = '';
+        document.getElementById('vulnerabilityResults').innerHTML = '';
+        document.getElementById('scanProgress').style.width = '0%';
+        document.getElementById('scanProgressText').textContent = '0%';
+        document.getElementById('viewReportBtn').style.display = 'none';
+        
+        // Send the scan request
+        fetch('/api/scan', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`Server returned ${response.status} ${response.statusText}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.error) {
+                throw new Error(data.error);
+            }
+            
+            // Start monitoring scan progress
+            monitorScan(data.scan_id);
+            setupEventStream(data.scan_id);
+        })
+        .catch(error => {
+            showError(`Failed to start scan: ${error.message}`);
+            resetScanForm();
+        });
+    }
+    
+    function monitorScan(scanId) {
+        // Set up interval to check scan status
+        const statusInterval = setInterval(() => {
+            fetch(`/api/scan/${scanId}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`Server returned ${response.status} ${response.statusText}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    // Update progress bar
+                    const progress = data.progress || 0;
+                    document.getElementById('scanProgress').style.width = `${progress}%`;
+                    document.getElementById('scanProgressText').textContent = `${progress}%`;
+                    
+                    // Check if scan is complete
+                    if (data.status === 'completed') {
+                        clearInterval(statusInterval);
+                        fetchScanResult(scanId);
+                        
+                        // Set links to reports
+                        if (data.report_json_path || data.report_md_path) {
+                            const reportPath = data.report_md_path || data.report_json_path;
+                            const reportBtn = document.getElementById('viewReportBtn');
+                            reportBtn.href = `/report/${encodeURIComponent(reportPath)}`;
+                            reportBtn.style.display = 'inline-block';
+                        }
+                    } 
+                    // Check for error
+                    else if (data.status === 'error') {
+                        clearInterval(statusInterval);
+                        showError('Scan failed. Please check the console output for details.');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error monitoring scan:', error);
+                    clearInterval(statusInterval);
+                });
+        }, 2000); // Check every 2 seconds
+    }
+    
+    function setupEventStream(scanId) {
+        // Set up event source for real-time console output
+        const eventSource = new EventSource('/api/stream');
+        
+        eventSource.addEventListener('message', function(event) {
+            try {
+                const data = JSON.parse(event.data);
+                
+                // Check if message is for our scan
+                if (data.scan_id === scanId && data.text) {
+                    // Append to console output
+                    appendToConsole(data.text);
+                }
+            } catch (error) {
+                console.error('Error processing event:', error);
+            }
+        });
+        
+        eventSource.addEventListener('error', function() {
+            eventSource.close();
+        });
+    }
+    
+    function fetchScanResult(scanId) {
+        fetch(`/api/scan/${scanId}/result`)
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`Server returned ${response.status} ${response.statusText}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.status === 'completed' && data.result) {
+                    displayScanResults(data.result);
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching scan result:', error);
+            });
+    }
+    
+    function displayScanResults(result) {
+        const resultContainer = document.getElementById('vulnerabilityResults');
+        
+        // Clear previous content
+        resultContainer.innerHTML = '';
+        
+        // Create summary card
+        const summaryCard = document.createElement('div');
+        summaryCard.className = 'card mb-4';
+        
+        let vulnerabilitiesFound = 0;
+        if (result.vulnerabilities && Array.isArray(result.vulnerabilities)) {
+            vulnerabilitiesFound = result.vulnerabilities.length;
+        } else if (result.findings && Array.isArray(result.findings)) {
+            vulnerabilitiesFound = result.findings.length;
+        }
+        
+        // Set appropriate color based on vulnerabilities found
+        const statusColor = vulnerabilitiesFound > 0 ? 'danger' : 'success';
+        const statusIcon = vulnerabilitiesFound > 0 ? 'bi-exclamation-triangle' : 'bi-check-circle';
+        const statusText = vulnerabilitiesFound > 0 ? 'Vulnerabilities Detected' : 'No Vulnerabilities Detected';
+        
+        summaryCard.innerHTML = `
+            <div class="card-header bg-${statusColor} text-white">
+                <h5 class="mb-0"><i class="bi ${statusIcon} me-2"></i> Scan Complete - ${statusText}</h5>
+            </div>
+            <div class="card-body">
+                <p class="lead">Found <strong>${vulnerabilitiesFound}</strong> potential vulnerabilities.</p>
+                
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle me-2"></i>
+                    View the complete report for detailed information about all findings.
+                </div>
+            </div>
+        `;
+        
+        resultContainer.appendChild(summaryCard);
+    }
+    
+    function appendToConsole(text) {
+        const consoleOutput = document.getElementById('consoleOutput');
+        const line = document.createElement('div');
+        line.className = 'console-line';
+        line.textContent = text.trim();
+        consoleOutput.appendChild(line);
+        consoleOutput.scrollTop = consoleOutput.scrollHeight;
+    }
+    
+    function showError(message) {
+        const errorElement = document.getElementById('scanError');
+        errorElement.textContent = message;
+        errorElement.style.display = 'block';
+    }
+    
+    function resetScanForm() {
+        document.getElementById('scanFormContainer').style.display = 'block';
+        document.getElementById('scanResults').style.display = 'none';
+    }
 </script>
 {% endblock %} 
