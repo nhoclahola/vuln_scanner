@@ -248,6 +248,10 @@ class OutputCapture(object):
                 self.scan.progress = 5
             elif "Web Crawler" in text:
                 self.scan.progress = 10
+            elif "Crawling " in text:
+                # Don't regress progress if already higher
+                if self.scan.progress < 15:
+                    self.scan.progress = 15
             elif "Analyzing HTTP headers" in text:
                 self.scan.progress = 25
             elif "Discovering endpoints" in text:
@@ -255,13 +259,28 @@ class OutputCapture(object):
             elif "Analyzing JavaScript" in text:
                 self.scan.progress = 50
             elif "Scanning for XSS" in text:
-                self.scan.progress = 65
+                self.scan.progress = 60
             elif "Scanning for SQL" in text:
-                self.scan.progress = 75
-            elif "Analyzing vulnerabilities" in text:
+                self.scan.progress = 70
+            elif "Scanning for" in text and "vulnerabilities" in text:
+                # For other vulnerability types
+                if self.scan.progress < 75:
+                    self.scan.progress = 75
+            elif "Creating comprehensive summary" in text or "Create a comprehensive summary" in text:
+                self.scan.progress = 80
+            elif "formatting" in text.lower() and "report" in text.lower():
                 self.scan.progress = 85
+            elif "Generating report" in text or "Creating report" in text:
+                self.scan.progress = 90
             elif "Report saved" in text:
                 self.scan.progress = 100
+            # Fallback progress increments based on CrewAI markers
+            elif "Agent:" in text and self.scan.progress < 90:
+                # Small progress increment for any agent activity
+                self.scan.progress += 2
+                # Cap at 95 for agent activity (saving 100 for completion)
+                if self.scan.progress > 95:
+                    self.scan.progress = 95
         return len(text)
     
     def flush(self):
