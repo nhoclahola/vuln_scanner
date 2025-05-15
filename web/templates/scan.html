@@ -6,108 +6,108 @@
 
 {% block content %}
 <div class="container">
-    <div class="row">
-        <div class="col-lg-8 mx-auto">
-            <!-- Scan Form -->
+<div class="row">
+    <div class="col-lg-8 mx-auto">
+        <!-- Scan Form -->
             <div id="scanFormContainer" class="card mb-4">
                 <div class="card-header">
                     <h5 class="mb-0">Scan Configuration</h5>
                 </div>
                 <div class="card-body">
-                    <div class="alert alert-danger" id="scanError" style="display: none;"></div>
-                    
-                    <form id="scanForm">
-                        <div class="mb-4">
-                            <label for="url" class="form-label">Target URL</label>
-                            <div class="input-group">
-                                <span class="input-group-text"><i class="bi bi-globe"></i></span>
-                                <input type="url" class="form-control" id="url" name="url" placeholder="https://example.com" required>
-                            </div>
-                            <div class="form-text">Enter the full URL of the website you want to scan (including http:// or https://)</div>
+            <div class="alert alert-danger" id="scanError" style="display: none;"></div>
+            
+            <form id="scanForm">
+                <div class="mb-4">
+                    <label for="url" class="form-label">Target URL</label>
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-globe"></i></span>
+                        <input type="url" class="form-control" id="url" name="url" placeholder="https://example.com" required>
+                    </div>
+                    <div class="form-text">Enter the full URL of the website you want to scan (including http:// or https://)</div>
+                </div>
+                
+                <div class="row mb-4">
+                    <div class="col-md-6">
+                        <label class="form-label">Scan Type</label>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="scan_type" id="basicScan" value="basic" checked>
+                            <label class="form-check-label" for="basicScan">
+                                Basic Scan (Faster)
+                            </label>
+                            <div class="form-text">Quick scan for common vulnerabilities</div>
                         </div>
-                        
-                        <div class="row mb-4">
-                            <div class="col-md-6">
-                                <label class="form-label">Scan Type</label>
-                                <div class="form-check">
-                                    <input class="form-check-input" type="radio" name="scan_type" id="basicScan" value="basic" checked>
-                                    <label class="form-check-label" for="basicScan">
-                                        Basic Scan (Faster)
-                                    </label>
-                                    <div class="form-text">Quick scan for common vulnerabilities</div>
-                                </div>
-                                <div class="form-check mt-2">
+                        <div class="form-check mt-2">
                                     <input class="form-check-input" type="radio" name="scan_type" id="fullScan" value="full">
                                     <label class="form-check-label" for="fullScan">
                                         Full Scan (Deeper)
-                                    </label>
-                                    <div class="form-text">Thorough scan with more test vectors</div>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label">LLM Provider</label>
-                                <div class="form-check">
-                                    <input class="form-check-input" type="radio" name="llm_provider" id="deepseekProvider" value="deepseek" checked>
-                                    <label class="form-check-label" for="deepseekProvider">
-                                        DeepSeek
-                                    </label>
-                                </div>
-                                <div class="form-check mt-2">
-                                    <input class="form-check-input" type="radio" name="llm_provider" id="openaiProvider" value="openai">
-                                    <label class="form-check-label" for="openaiProvider">
-                                        OpenAI
-                                    </label>
-                                </div>
-                            </div>
+                            </label>
+                            <div class="form-text">Thorough scan with more test vectors</div>
                         </div>
-                        
-                        <div class="d-grid gap-2">
-                            <button type="submit" class="btn btn-primary btn-lg">
-                                <i class="bi bi-shield-check me-2"></i> Start Scan
-                            </button>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">LLM Provider</label>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="llm_provider" id="deepseekProvider" value="deepseek" checked>
+                            <label class="form-check-label" for="deepseekProvider">
+                                DeepSeek
+                            </label>
                         </div>
-                    </form>
+                        <div class="form-check mt-2">
+                            <input class="form-check-input" type="radio" name="llm_provider" id="openaiProvider" value="openai">
+                            <label class="form-check-label" for="openaiProvider">
+                                OpenAI
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="d-grid gap-2">
+                    <button type="submit" class="btn btn-primary btn-lg">
+                        <i class="bi bi-shield-check me-2"></i> Start Scan
+                    </button>
+                </div>
+            </form>
+                </div>
+        </div>
+        
+        <!-- Scan Results (hidden until scan starts) -->
+            <div id="scanResults" style="display: none;">
+            <div class="card mb-4">
+                <div class="card-header">
+                        <h5 class="mb-0">Scan Progress</h5>
+                </div>
+                <div class="card-body">
+                    <div class="scan-progress">
+                        <div class="progress mb-3">
+                            <div id="scanProgress" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
+                        </div>
+                        <div class="d-flex justify-content-between">
+                            <span id="scanProgressText">0%</span>
+                            <a id="viewReportBtn" href="#" class="btn btn-sm btn-outline-primary" style="display: none;">View Full Report</a>
+                        </div>
+                    </div>
                 </div>
             </div>
             
-            <!-- Scan Results (hidden until scan starts) -->
-            <div id="scanResults" style="display: none;">
-                <div class="card mb-4">
-                    <div class="card-header">
-                        <h5 class="mb-0">Scan Progress</h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="scan-progress">
-                            <div class="progress mb-3">
-                                <div id="scanProgress" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
-                            </div>
-                            <div class="d-flex justify-content-between">
-                                <span id="scanProgressText">0%</span>
-                                <a id="viewReportBtn" href="#" class="btn btn-sm btn-outline-primary" style="display: none;">View Full Report</a>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="card mb-4">
-                    <div class="card-header">
+            <div class="card mb-4">
+                <div class="card-header">
                         <h5 class="mb-0">Console Output</h5>
-                    </div>
-                    <div class="card-body p-0">
+                </div>
+                <div class="card-body p-0">
                         <pre id="consoleOutput" class="console-output">
-                            <!-- Console output will be added here -->
+                        <!-- Console output will be added here -->
                         </pre>
-                    </div>
                 </div>
-                
-                <div id="vulnerabilityResults">
-                    <!-- Vulnerability results will be added here -->
-                </div>
-                
-                <div class="d-grid gap-2 mt-4">
+            </div>
+            
+            <div id="vulnerabilityResults">
+                <!-- Vulnerability results will be added here -->
+            </div>
+            
+            <div class="d-grid gap-2 mt-4">
                     <button type="button" class="btn btn-outline-primary" onclick="resetScanForm()">
-                        <i class="bi bi-arrow-left me-2"></i> Back to Scan Form
-                    </button>
+                    <i class="bi bi-arrow-left me-2"></i> Back to Scan Form
+                </button>
                 </div>
             </div>
         </div>

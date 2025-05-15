@@ -54,6 +54,23 @@ def get_scan_history_from_db():
         for row in rows:
             item = dict(row)
             
+            # Xử lý timestamp để đảm bảo client có thể hiển thị đúng
+            if item['scan_timestamp']:
+                # Nếu là chuỗi định dạng ngày tháng, chuyển thành timestamp số để client dễ xử lý
+                if isinstance(item['scan_timestamp'], str):
+                    try:
+                        dt = datetime.strptime(item['scan_timestamp'], "%Y-%m-%d %H:%M:%S")
+                        item['timestamp'] = int(dt.timestamp())
+                    except (ValueError, TypeError):
+                        # Nếu không phải định dạng chuẩn, giữ nguyên
+                        item['timestamp'] = item['scan_timestamp']
+                else:
+                    # Nếu đã là số, gán trực tiếp
+                    item['timestamp'] = item['scan_timestamp']
+            else:
+                # Nếu không có timestamp, dùng thời gian hiện tại
+                item['timestamp'] = int(time.time())
+            
             # Tính thời gian quét từ scan_timestamp và end_time
             if item['scan_timestamp'] and item['end_time']:
                 try:
@@ -174,7 +191,7 @@ class ThreadedScan:
                 "json": json_report_path,
                 "markdown": md_report_path
             }
-            
+                
             # Calculate duration
             duration = (self.end_time or datetime.now()) - self.start_time
             duration_seconds = duration.total_seconds()
@@ -200,40 +217,34 @@ class ThreadedScan:
             except Exception as e:
                 logger.error(f"Error saving scan history: {str(e)}")
             
-        except Exception as e:
-            logger.error(f"Error in scan: {str(e)}")
-            self.status = "error"
-            self.result = {"error": str(e)}
-            
-            # Cập nhật trạng thái trong database
+            # Ghi log kết thúc quét và lưu báo cáo vào database
             if self.db_scan_id:
-                log_scan_end(self.db_scan_id, "Error")
+                log_scan_end(self.db_scan_id, json_report_path, md_report_path)
             
-            # Add error entry to scan history
-            scan_record = {
-                "id": self.scan_id,
-                "db_id": self.db_scan_id,
-                "target_url": self.target_url,
-                "scan_type": self.scan_type,
-                "timestamp": int(time.mktime(self.start_time.timetuple())),
-                "duration": 0,
-                "status": "error",
-                "error": str(e)
-            }
-            scan_history.append(scan_record)
-            
-            # Try to save scan history
-            try:
-                with open('scan_history.json', 'w') as f:
-                    json.dump(scan_history, f)
-            except Exception as ex:
-                logger.error(f"Error saving scan history after error: {str(ex)}")
-                
+            self.progress = 100  # Set progress to 100% when complete
+            self.end_time = datetime.now()
+        except Exception as e:
+            self.status = "failed"
+            self.result = f"Error: {str(e)}"
+            logger.error(f"Scan error: {str(e)}", exc_info=True)
+            if self.db_scan_id:
+                # Update DB record to indicate failure
+                try:
+                    conn = sqlite3.connect(DB_NAME)
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        UPDATE scans 
+                        SET status = ?, end_time = ?
+                        WHERE id = ?
+                    """, ("failed", datetime.now().strftime("%Y-%m-%d %H:%M:%S"), self.db_scan_id))
+                    conn.commit()
+                    conn.close()
+                except Exception as db_error:
+                    logger.error(f"Failed to update scan status in DB: {str(db_error)}")
         finally:
-            # Restore stdout and stderr
+            # Restore stdout
             sys.stdout = original_stdout
             sys.stderr = original_stderr
-            self.end_time = datetime.now()
 
 class OutputCapture(object):
     def __init__(self, scan):
@@ -448,7 +459,7 @@ def scan_result(scan_id):
                         "text_result": str(scan.result),
                         "type": "text"
                     }
-            
+                
             return jsonify({
                 "status": "completed", 
                 "result": formatted_result,
@@ -488,80 +499,14 @@ def history_page():
 # API lấy lịch sử quét
 @app.route('/api/history')
 def get_scan_history():
-    # Chỉ lấy từ database SQLite
-    db_history = get_scan_history_from_db()
-    
-    if db_history:
-        # Format history data from database
-        history_data = []
-        for item in db_history:
-            try:
-                # Kiểm tra và chuyển đổi scan_timestamp thành định dạng ngày giờ phù hợp
-                scan_date = None
-                if item['scan_timestamp']:
-                    if isinstance(item['scan_timestamp'], str):
-                        try:
-                            scan_date = datetime.strptime(item['scan_timestamp'], "%Y-%m-%d %H:%M:%S")
-                        except ValueError:
-                            # Thử các định dạng ngày giờ khác nếu cần
-                            scan_date = datetime.fromtimestamp(float(item['scan_timestamp']))
-                    else:
-                        scan_date = datetime.fromtimestamp(item['scan_timestamp'])
-                
-                if not scan_date:
-                    scan_date = datetime.now()
-                
-                # Tạo mục lịch sử với các trường chuẩn
-                history_item = {
-                    "id": item['id'],
-                    "target_url": item['target_url'],
-                    "scan_type": item['scan_type'] or 'basic',
-                    "timestamp": int(scan_date.timestamp()),
-                    "status": item['status'] or 'Unknown',
-                    "report_json_path": item['report_json_path'],
-                    "report_md_path": item['report_md_path'],
-                    "date": scan_date.strftime("%Y-%m-%d %H:%M:%S"),
-                    "duration": item.get('duration', 'N/A'),  # Lấy duration từ bản ghi cơ sở dữ liệu
-                    "vulnerabilities": item.get('vulnerabilities', 0)  # Lấy từ item nếu có
-                }
-                
-                # Nếu không có thông tin vulnerabilities, thử đọc từ file báo cáo
-                if history_item['vulnerabilities'] == 0 and history_item['report_json_path'] and os.path.exists(history_item['report_json_path']):
-                    try:
-                        with open(history_item['report_json_path'], 'r', encoding='utf-8') as f:
-                            report_data = json.load(f)
-                            if 'summary' in report_data and 'total_vulnerabilities' in report_data['summary']:
-                                history_item['vulnerabilities'] = report_data['summary']['total_vulnerabilities']
-                            elif 'vulnerabilities' in report_data and isinstance(report_data['vulnerabilities'], list):
-                                history_item['vulnerabilities'] = len(report_data['vulnerabilities'])
-                    except Exception as e:
-                        logger.error(f"Error reading report vulnerabilities: {str(e)}")
-                
-                # Kiểm tra nếu file báo cáo tồn tại
-                if history_item['report_json_path'] and not os.path.exists(history_item['report_json_path']):
-                    history_item['report_json_path'] = None
-                
-                if history_item['report_md_path'] and not os.path.exists(history_item['report_md_path']):
-                    history_item['report_md_path'] = None
-                
-                history_data.append(history_item)
-            except Exception as e:
-                logger.error(f"Error formatting history item: {str(e)}")
-                # Vẫn thêm vào danh sách nhưng với dữ liệu tối thiểu
-                history_data.append({
-                    "id": item.get('id', 0),
-                    "target_url": item.get('target_url', 'Unknown'),
-                    "scan_type": item.get('scan_type', 'basic'),
-                    "timestamp": int(time.time()),
-                    "status": "Error",
-                    "duration": "N/A",
-                    "vulnerabilities": 0
-                })
-        
-        return jsonify(history_data)
-    
-    # Trả về danh sách rỗng nếu không có dữ liệu
-    return jsonify([])
+    """Lấy lịch sử quét từ database"""
+    try:
+        # Chỉ lấy từ database SQLite
+        history = get_scan_history_from_db()
+        return jsonify(history)
+    except Exception as e:
+        logger.error(f"Error getting scan history: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
 # API liệt kê báo cáo
 @app.route('/api/reports')
@@ -680,6 +625,62 @@ def get_report(filename):
     except Exception as e:
         return jsonify({"error": f"Error reading report: {str(e)}"}), 500
 
+# API xóa lịch sử quét
+@app.route('/api/history/<int:scan_id>', methods=['DELETE'])
+def delete_scan_history(scan_id):
+    """Delete a specific scan record from the database and its associated report files"""
+    try:
+        # First get the scan details to find report files
+        conn = sqlite3.connect(DB_NAME)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT report_json_path, report_md_path
+            FROM scans
+            WHERE id = ?
+        """, (scan_id,))
+        scan = cursor.fetchone()
+        
+        if not scan:
+            return jsonify({"success": False, "error": "Scan record not found"}), 404
+        
+        # Get report paths
+        report_json_path = scan['report_json_path']
+        report_md_path = scan['report_md_path']
+        
+        # Delete the scan record from database
+        cursor.execute("DELETE FROM scans WHERE id = ?", (scan_id,))
+        conn.commit()
+        conn.close()
+        
+        # Delete associated report files if they exist
+        files_deleted = []
+        
+        if report_json_path and os.path.exists(report_json_path):
+            os.remove(report_json_path)
+            files_deleted.append(report_json_path)
+            
+            # Also try to delete any associated .txt file
+            txt_filename = report_json_path.replace('.json', '.txt')
+            if os.path.exists(txt_filename):
+                os.remove(txt_filename)
+                files_deleted.append(txt_filename)
+        
+        if report_md_path and os.path.exists(report_md_path):
+            os.remove(report_md_path)
+            files_deleted.append(report_md_path)
+        
+        logger.info(f"Deleted scan record ID {scan_id} and {len(files_deleted)} associated files")
+        
+        return jsonify({
+            "success": True, 
+            "message": f"Scan record and {len(files_deleted)} associated files deleted successfully",
+            "files_deleted": files_deleted
+        })
+    except Exception as e:
+        logger.error(f"Error deleting scan record: {str(e)}", exc_info=True)
+        return jsonify({"success": False, "error": f"Error deleting scan record: {str(e)}"}), 500
+
 # API xóa báo cáo
 @app.route('/api/report/<path:filename>', methods=['DELETE'])
 def delete_report(filename):
@@ -694,22 +695,31 @@ def delete_report(filename):
             if os.path.exists(txt_filename):
                 os.remove(txt_filename)
                 
-            # Update scan history if needed
-            global scan_history
-            # Filter out entries with this report file
-            scan_history = [scan for scan in scan_history if scan.get('report_file') != filename]
+            # Check if this report is associated with any scan in the database
+            conn = sqlite3.connect(DB_NAME)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id FROM scans 
+                WHERE report_json_path = ? OR report_md_path = ?
+            """, (filename, filename))
+            scan = cursor.fetchone()
             
-            # Save updated history
-            try:
-                with open('scan_history.json', 'w') as f:
-                    json.dump(scan_history, f, indent=2)
-            except Exception as e:
-                logger.error(f"Error saving scan history after deletion: {str(e)}")
+            if scan:
+                # Update the database record to remove the reference to this file
+                if filename.endswith('.json'):
+                    cursor.execute("UPDATE scans SET report_json_path = NULL WHERE id = ?", (scan['id'],))
+                elif filename.endswith('.md'):
+                    cursor.execute("UPDATE scans SET report_md_path = NULL WHERE id = ?", (scan['id'],))
+                conn.commit()
+            
+            conn.close()
             
             return jsonify({"success": True, "message": "Report deleted successfully"})
         else:
             return jsonify({"success": False, "error": "Report not found"}), 404
     except Exception as e:
+        logger.error(f"Error deleting report: {str(e)}", exc_info=True)
         return jsonify({"success": False, "error": f"Error deleting report: {str(e)}"}), 500
 
 # Trang chi tiết báo cáo
@@ -758,9 +768,16 @@ def get_scan_by_db_id(db_id):
                         # Chuyển từ string sang datetime rồi thành unix timestamp
                         dt = datetime.strptime(timestamp_display, "%Y-%m-%d %H:%M:%S")
                         timestamp_unix = int(dt.timestamp())
-                    except (ValueError, TypeError):
-                        # Nếu lỗi, để giá trị mặc định
-                        timestamp_unix = int(time.time())
+                    except (ValueError, TypeError) as e:
+                        # Try alternative formats if the standard format fails
+                        try:
+                            # Try ISO format
+                            dt = datetime.fromisoformat(timestamp_display.replace('Z', '+00:00'))
+                            timestamp_unix = int(dt.timestamp())
+                        except:
+                            # If all parsing fails, use current time
+                            logger.error(f"Error parsing timestamp string '{timestamp_display}': {e}")
+                            timestamp_unix = int(time.time())
                 else:
                     # Nếu là số, giả định đó là unix timestamp
                     timestamp_unix = int(timestamp_display)

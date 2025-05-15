@@ -18,13 +18,13 @@
                         <i class="bi bi-markdown"></i> Markdown View
                     </button>
                 </div>
-                <div id="reportActions" style="display: none;">
-                    <a id="downloadJsonBtn" href="#" class="btn btn-sm btn-outline-primary">
-                        <i class="bi bi-download"></i> Download JSON
-                    </a>
+            <div id="reportActions" style="display: none;">
+                <a id="downloadJsonBtn" href="#" class="btn btn-sm btn-outline-primary">
+                    <i class="bi bi-download"></i> Download JSON
+                </a>
                     <a id="downloadMdBtn" href="#" class="btn btn-sm btn-outline-primary ms-2">
                         <i class="bi bi-file-text"></i> Download Markdown
-                    </a>
+                </a>
                 </div>
             </div>
         </div>
@@ -257,7 +257,7 @@
             markdown += '## Summary\n\n';
             markdown += `- **Target URL**: ${data.summary.target_url || 'Unknown'}\n`;
             markdown += `- **Scan Type**: ${data.summary.scan_type || 'Unknown'}\n`;
-            markdown += `- **Scan Date**: ${data.summary.scan_timestamp || 'Unknown'}\n`;
+            markdown += `- **Scan Date**: ${formatDate(data.summary.scan_timestamp)}\n`;
             markdown += `- **Total Vulnerabilities**: ${data.summary.total_vulnerabilities || 0}\n`;
             
             if (data.summary.critical_count !== undefined) {
@@ -514,7 +514,22 @@
         // Extract from "summary" format (JSON Formatter Agent output)
         if (data.summary) {
             targetUrl = data.summary.target_url || '';
-            scanDate = data.summary.scan_timestamp || '';
+            
+            // Improved timestamp handling
+            if (data.summary.scan_timestamp) {
+                // Try to parse the timestamp in different formats
+                if (typeof data.summary.scan_timestamp === 'number') {
+                    // Unix timestamp (seconds)
+                    scanDate = new Date(data.summary.scan_timestamp * 1000).toLocaleString();
+                } else if (!isNaN(parseInt(data.summary.scan_timestamp))) {
+                    // Numeric string that can be parsed as timestamp
+                    scanDate = new Date(parseInt(data.summary.scan_timestamp) * 1000).toLocaleString();
+                } else {
+                    // Already formatted date string
+                    scanDate = data.summary.scan_timestamp;
+                }
+            }
+            
             totalVulns = data.summary.total_vulnerabilities || 0;
             
             // Extract vulnerabilities
@@ -531,8 +546,24 @@
                 targetUrl = data.target_url;
             }
             
+            // Improved timestamp handling for older format
             if (data.scan_date) {
-                scanDate = data.scan_date;
+                if (typeof data.scan_date === 'number') {
+                    scanDate = new Date(data.scan_date * 1000).toLocaleString();
+                } else if (!isNaN(parseInt(data.scan_date))) {
+                    scanDate = new Date(parseInt(data.scan_date) * 1000).toLocaleString();
+                } else {
+                    scanDate = data.scan_date;
+                }
+            } else if (data.timestamp) {
+                // Alternative timestamp field
+                if (typeof data.timestamp === 'number') {
+                    scanDate = new Date(data.timestamp * 1000).toLocaleString();
+                } else if (!isNaN(parseInt(data.timestamp))) {
+                    scanDate = new Date(parseInt(data.timestamp) * 1000).toLocaleString();
+                } else {
+                    scanDate = data.timestamp;
+                }
             }
         }
         
@@ -557,7 +588,7 @@
             <div class="row mb-4">
                 <div class="col-md-6">
                     <h5>Target: ${escapeHtml(targetUrl)}</h5>
-                    <p class="text-muted">Scanned on: ${scanDate || 'Unknown'}</p>
+                    <p class="text-muted">Scanned on: ${formatDate(scanDate)}</p>
                 </div>
                 <div class="col-md-6 text-md-end">
                     <span class="badge bg-danger me-2">${criticalCount} Critical</span>
@@ -795,7 +826,7 @@
             <div class="card mb-4">
                 <div class="card-header bg-${colorClass} text-white">
                     <h5 class="card-title mb-0">${severityName} Severity Vulnerabilities (${vulnerabilities.length})</h5>
-                </div>
+                    </div>
                 <div class="card-body">
         `;
         
@@ -828,8 +859,8 @@
         });
         
         html += `
-                </div>
-            </div>
+                        </div>
+                        </div>
         `;
         
         return html;
@@ -848,6 +879,48 @@
              .replace(/>/g, "&gt;")
              .replace(/"/g, "&quot;")
              .replace(/'/g, "&#039;");
+    }
+    
+    // Helper function to format dates consistently
+    function formatDate(timestamp) {
+        if (!timestamp) return 'Unknown';
+        
+        try {
+            // If it's a number (timestamp), convert to date
+            if (typeof timestamp === 'number') {
+                return new Date(timestamp * 1000).toLocaleString();
+            }
+            
+            // If it's a numeric string that can be parsed as timestamp
+            if (typeof timestamp === 'string') {
+                // If it's a string of numbers only (unix timestamp)
+                if (/^\d+$/.test(timestamp)) {
+                    return new Date(parseInt(timestamp) * 1000).toLocaleString();
+                }
+                
+                // If it's already a formatted date string like '2023-05-10 14:30:45'
+                if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(timestamp)) {
+                    return timestamp;
+                }
+                
+                // Otherwise, try to parse it as a regular date string
+                const date = new Date(timestamp);
+                if (!isNaN(date.getTime())) {
+                    return date.toLocaleString();
+                }
+            }
+            
+            // If it's already a string date 
+            return timestamp;
+        } catch (e) {
+            console.error('Error formatting date:', e);
+            return 'Unknown';
+        }
+    }
+    
+    // Helper function to format vulnerability card
+    function formatVulnerabilitySummary(vulnerability) {
+        // ... existing code ...
     }
 </script>
 <style>
