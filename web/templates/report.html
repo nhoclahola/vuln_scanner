@@ -9,13 +9,23 @@
     <div class="card mb-4">
         <div class="card-header d-flex justify-content-between align-items-center">
             <h5 class="card-title mb-0">Report Details</h5>
-            <div id="reportActions" style="display: none;">
-                <a id="downloadJsonBtn" href="#" class="btn btn-sm btn-outline-primary">
-                    <i class="bi bi-download"></i> Download JSON
-                </a>
-                <a id="downloadMdBtn" href="#" class="btn btn-sm btn-outline-primary ms-2">
-                    <i class="bi bi-file-text"></i> Download Markdown
-                </a>
+            <div class="d-flex">
+                <div class="btn-group me-2" id="viewToggle" style="display: none;">
+                    <button type="button" class="btn btn-sm btn-outline-primary active" id="jsonViewBtn">
+                        <i class="bi bi-code-slash"></i> JSON View
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-primary" id="markdownViewBtn">
+                        <i class="bi bi-markdown"></i> Markdown View
+                    </button>
+                </div>
+                <div id="reportActions" style="display: none;">
+                    <a id="downloadJsonBtn" href="#" class="btn btn-sm btn-outline-primary">
+                        <i class="bi bi-download"></i> Download JSON
+                    </a>
+                    <a id="downloadMdBtn" href="#" class="btn btn-sm btn-outline-primary ms-2">
+                        <i class="bi bi-file-text"></i> Download Markdown
+                    </a>
+                </div>
             </div>
         </div>
         <div class="card-body">
@@ -156,9 +166,199 @@
         
         document.getElementById('reportActions').style.display = 'block';
         
+        // Setup view toggle buttons
+        const jsonViewBtn = document.getElementById('jsonViewBtn');
+        const markdownViewBtn = document.getElementById('markdownViewBtn');
+        
+        // Store report data globally for view switching
+        window.reportData = {
+            jsonData: null,
+            markdownData: null,
+            currentPath: reportPath,
+            hasVulnerabilities: false
+        };
+        
+        // Add event listeners to toggle buttons
+        jsonViewBtn.addEventListener('click', function() {
+            if (!this.classList.contains('active')) {
+                this.classList.add('active');
+                markdownViewBtn.classList.remove('active');
+                showJsonView();
+            }
+        });
+        
+        markdownViewBtn.addEventListener('click', function() {
+            if (!this.classList.contains('active')) {
+                this.classList.add('active');
+                jsonViewBtn.classList.remove('active');
+                showMarkdownView();
+            }
+        });
+        
         // Load the report - use the original path
         loadReport(reportPath);
     });
+    
+    function showJsonView() {
+        // Show JSON view elements
+        document.getElementById('reportSummary').style.display = 'block';
+        document.getElementById('visualizationDashboard').style.display = window.reportData.hasVulnerabilities ? 'block' : 'none';
+        document.getElementById('vulnerabilities').style.display = 'block';
+        
+        // Hide Markdown view
+        document.getElementById('markdownReport').style.display = 'none';
+    }
+    
+    function showMarkdownView() {
+        // Hide JSON view elements
+        document.getElementById('reportSummary').style.display = 'none';
+        document.getElementById('visualizationDashboard').style.display = 'none';
+        document.getElementById('vulnerabilities').style.display = 'none';
+        
+        // Show Markdown view
+        document.getElementById('markdownReport').style.display = 'block';
+        
+        // If we don't have markdown data yet, try to load it
+        if (!window.reportData.markdownData) {
+            const mdPath = window.reportData.currentPath.endsWith('.json') 
+                ? window.reportData.currentPath.replace('.json', '.md') 
+                : window.reportData.currentPath + '.md';
+                
+            tryLoadReport(mdPath)
+                .then(success => {
+                    // Successfully loaded markdown
+                })
+                .catch(error => {
+                    // If markdown loading fails, generate it from JSON
+                    if (window.reportData.jsonData) {
+                        const generatedMarkdown = generateMarkdownFromJson(window.reportData.jsonData);
+                        displayMarkdownReport(generatedMarkdown);
+                    } else {
+                        document.getElementById('markdownContent').innerHTML = `
+                            <div class="alert alert-warning">
+                                <i class="bi bi-exclamation-triangle me-2"></i>
+                                Markdown report is not available and cannot be generated.
+                            </div>
+                        `;
+                    }
+                });
+        }
+    }
+    
+    function generateMarkdownFromJson(data) {
+        // Generate a markdown representation of the JSON data
+        let markdown = '';
+        
+        // Add header
+        markdown += '# Vulnerability Scan Report\n\n';
+        
+        // Add summary section
+        if (data.summary) {
+            markdown += '## Summary\n\n';
+            markdown += `- **Target URL**: ${data.summary.target_url || 'Unknown'}\n`;
+            markdown += `- **Scan Type**: ${data.summary.scan_type || 'Unknown'}\n`;
+            markdown += `- **Scan Date**: ${data.summary.scan_timestamp || 'Unknown'}\n`;
+            markdown += `- **Total Vulnerabilities**: ${data.summary.total_vulnerabilities || 0}\n`;
+            
+            if (data.summary.critical_count !== undefined) {
+                markdown += `- **Critical**: ${data.summary.critical_count}\n`;
+            }
+            if (data.summary.high_count !== undefined) {
+                markdown += `- **High**: ${data.summary.high_count}\n`;
+            }
+            if (data.summary.medium_count !== undefined) {
+                markdown += `- **Medium**: ${data.summary.medium_count}\n`;
+            }
+            if (data.summary.low_count !== undefined) {
+                markdown += `- **Low**: ${data.summary.low_count}\n`;
+            }
+            
+            markdown += `- **Overall Risk Level**: ${data.summary.overall_risk_level || 'Unknown'}\n\n`;
+        }
+        
+        // Add vulnerabilities section
+        if (data.vulnerabilities && data.vulnerabilities.length > 0) {
+            markdown += '## Vulnerabilities\n\n';
+            
+            // Group by severity
+            const criticalVulns = data.vulnerabilities.filter(v => v.severity && v.severity.toLowerCase().includes('critical'));
+            const highVulns = data.vulnerabilities.filter(v => v.severity && v.severity.toLowerCase().includes('high'));
+            const mediumVulns = data.vulnerabilities.filter(v => v.severity && v.severity.toLowerCase().includes('medium'));
+            const lowVulns = data.vulnerabilities.filter(v => v.severity && v.severity.toLowerCase().includes('low'));
+            
+            // Add Critical vulnerabilities
+            if (criticalVulns.length > 0) {
+                markdown += '### Critical Severity\n\n';
+                criticalVulns.forEach(vuln => {
+                    markdown += formatVulnerabilityMarkdown(vuln);
+                });
+            }
+            
+            // Add High vulnerabilities
+            if (highVulns.length > 0) {
+                markdown += '### High Severity\n\n';
+                highVulns.forEach(vuln => {
+                    markdown += formatVulnerabilityMarkdown(vuln);
+                });
+            }
+            
+            // Add Medium vulnerabilities
+            if (mediumVulns.length > 0) {
+                markdown += '### Medium Severity\n\n';
+                mediumVulns.forEach(vuln => {
+                    markdown += formatVulnerabilityMarkdown(vuln);
+                });
+            }
+            
+            // Add Low vulnerabilities
+            if (lowVulns.length > 0) {
+                markdown += '### Low Severity\n\n';
+                lowVulns.forEach(vuln => {
+                    markdown += formatVulnerabilityMarkdown(vuln);
+                });
+            }
+        } else {
+            markdown += '## No vulnerabilities found\n\n';
+        }
+        
+        return markdown;
+    }
+    
+    function formatVulnerabilityMarkdown(vuln) {
+        let md = '';
+        md += `#### ${vuln.name || vuln.type || 'Unknown Vulnerability'}\n\n`;
+        
+        if (vuln.id) {
+            md += `- **ID**: ${vuln.id}\n`;
+        }
+        
+        if (vuln.severity) {
+            md += `- **Severity**: ${vuln.severity}\n`;
+        }
+        
+        if (vuln.cvss_score) {
+            md += `- **CVSS Score**: ${vuln.cvss_score}\n`;
+        }
+        
+        if (vuln.location) {
+            md += `- **Location**: ${vuln.location}\n`;
+        }
+        
+        if (vuln.parameter) {
+            md += `- **Parameter**: ${vuln.parameter}\n`;
+        }
+        
+        if (vuln.description) {
+            md += `\n**Description**:\n\n${vuln.description}\n\n`;
+        }
+        
+        if (vuln.remediation) {
+            md += `**Remediation**:\n\n${vuln.remediation}\n\n`;
+        }
+        
+        md += '---\n\n';
+        return md;
+    }
     
     function loadReport(path) {
         // First try to load the report with the original path
@@ -223,9 +423,23 @@
             .then(data => {
                 if (data.content) {
                     // API returns content wrapped in a content field
+                    if (path.endsWith('.md')) {
+                        // Store markdown data
+                        window.reportData.markdownData = data.content;
+                    } else {
+                        // Store JSON data
+                        window.reportData.jsonData = data.content;
+                    }
                     displayReport(data.content, path);
                 } else {
                     // Direct JSON data
+                    if (path.endsWith('.md')) {
+                        // Store markdown data
+                        window.reportData.markdownData = data;
+                    } else {
+                        // Store JSON data
+                        window.reportData.jsonData = data;
+                    }
                     displayReport(data, path);
                 }
                 return true; // Successfully loaded
@@ -236,15 +450,31 @@
         // Hide loader
         document.getElementById('reportLoader').style.display = 'none';
         
+        // Show view toggle buttons if not already visible
+        document.getElementById('viewToggle').style.display = 'flex';
+        
         // Check if this is a markdown report
         if ((data.type === 'markdown') || (path && path.endsWith('.md'))) {
+            // If it's markdown, store it and switch to markdown view
+            window.reportData.markdownData = data.content || data;
+            
+            // Update toggle button states
+            document.getElementById('jsonViewBtn').classList.remove('active');
+            document.getElementById('markdownViewBtn').classList.add('active');
+            
             displayMarkdownReport(data.content || data);
             return;
         }
         
+        // It's a JSON report, process it
+        
         // Show summary section for JSON reports
         const summarySection = document.getElementById('reportSummary');
         summarySection.style.display = 'block';
+        
+        // Update toggle button states
+        document.getElementById('jsonViewBtn').classList.add('active');
+        document.getElementById('markdownViewBtn').classList.remove('active');
         
         // Kiểm tra nếu dữ liệu là kết quả dạng text
         if (data.type === 'text' && data.text_result) {
@@ -305,6 +535,9 @@
                 scanDate = data.scan_date;
             }
         }
+        
+        // Store whether we have vulnerabilities for the view toggle
+        window.reportData.hasVulnerabilities = vulnerabilities.length > 0;
         
         // Count vulnerabilities by severity
         let criticalCount = 0, highCount = 0, mediumCount = 0, lowCount = 0;
@@ -516,9 +749,10 @@
     }
     
     function displayMarkdownReport(markdownContent) {
-        // Hide summary section
+        // Hide JSON-related sections
         document.getElementById('reportSummary').style.display = 'none';
         document.getElementById('visualizationDashboard').style.display = 'none';
+        document.getElementById('vulnerabilities').style.display = 'none';
         
         // If we get a string, use it directly
         let content = typeof markdownContent === 'string' ? markdownContent : '';
