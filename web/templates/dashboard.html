@@ -112,19 +112,23 @@
 {% block extra_js %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
+    const vulnDistributionDataFromFlask = {{ vulnerability_distribution | tojson | safe }};
+    let vulnDistributionChartInstance = null;
+    let scanActivityChartInstance = null;
+
     document.addEventListener('DOMContentLoaded', function() {
-        // Load dashboard data
         loadDashboardData();
-        
-        // Set up theme-aware Chart.js
         setupChartTheme();
+        if (vulnDistributionDataFromFlask && typeof vulnDistributionDataFromFlask === 'object') {
+            createVulnDistributionChart(vulnDistributionDataFromFlask);
+        } else {
+            console.warn('Vulnerability distribution data from Flask is not available or not an object.');
+            createVulnDistributionChart({ critical: 0, high: 0, medium: 0, low: 0, unknown: 0 });
+        }
     });
     
     function setupChartTheme() {
-        // Get current theme
         const isDarkMode = document.documentElement.getAttribute('data-theme') === 'dark';
-        
-        // Set Chart.js defaults based on theme
         Chart.defaults.color = isDarkMode ? '#e0e0e0' : '#666666';
         Chart.defaults.borderColor = isDarkMode ? '#2d2d3a' : '#eeeeee';
     }
@@ -134,6 +138,7 @@
         const table = document.getElementById('recentScansTable');
         const noScans = document.getElementById('noScansMessage');
         const errorMsg = document.getElementById('errorMessage');
+        const errorText = document.getElementById('errorText');
         
         // Show loader, hide everything else
         loader.style.display = 'block';
@@ -172,33 +177,18 @@
                 console.error('Error loading dashboard data:', error);
                 loader.style.display = 'none';
                 errorMsg.style.display = 'block';
-                document.getElementById('errorText').textContent = error.message || 'Failed to load scan history.';
+                errorText.textContent = error.message || 'Failed to load scan history.';
             });
     }
     
     function displayDashboardData(historyData) {
-        // Calculate statistics
         const totalScans = historyData.length;
-        let totalVulnerabilities = 0;
         let totalScanTime = 0;
         let latestScanTimestamp = 0;
-        
-        // Prepare data for charts
-        let vulnerabilityTypes = {
-            'critical': 0,
-            'high': 0,
-            'medium': 0,
-            'low': 0
-        };
-        
         let scanDates = {};
         
         // Process all scan data
         historyData.forEach(scan => {
-            // Total vulnerabilities
-            const vulnCount = parseInt(scan.vulnerabilities) || 0;
-            totalVulnerabilities += vulnCount;
-            
             // Scan time calculation
             if (scan.duration && scan.duration !== 'N/A') {
                 const duration = parseFloat(scan.duration);
@@ -222,7 +212,17 @@
         
         // Update statistics cards
         document.getElementById('total-scans').textContent = totalScans;
-        document.getElementById('total-vulns').textContent = totalVulnerabilities;
+        
+        let totalVulnerabilitiesFromServer = 0;
+        if (vulnDistributionDataFromFlask && typeof vulnDistributionDataFromFlask === 'object') {
+            totalVulnerabilitiesFromServer = 
+                (vulnDistributionDataFromFlask.critical || 0) +
+                (vulnDistributionDataFromFlask.high || 0) +
+                (vulnDistributionDataFromFlask.medium || 0) +
+                (vulnDistributionDataFromFlask.low || 0) +
+                (vulnDistributionDataFromFlask.unknown || 0);
+        }
+        document.getElementById('total-vulns').textContent = totalVulnerabilitiesFromServer;
         
         // Calculate average scan time
         if (totalScans > 0 && totalScanTime > 0) {
@@ -318,90 +318,111 @@
         recentScansTable.innerHTML = tableHTML;
         recentScansTable.style.display = 'block';
         
-        // Create charts
-        createVulnerabilityDistributionChart(vulnerabilityTypes);
-        createScanActivityChart(scanDates);
+        // Vẽ biểu đồ Scan Activity (logic này có thể đã có hoặc cần thêm)
+        if (Object.keys(scanDates).length > 0) {
+            createScanActivityChart(scanDates);
+        }
     }
     
-    function createVulnerabilityDistributionChart(vulnerabilityTypes) {
-        const ctx = document.getElementById('vulnDistributionChart').getContext('2d');
-        
-        new Chart(ctx, {
-            type: 'doughnut',
-            data: {
-                labels: ['Critical', 'High', 'Medium', 'Low'],
-                datasets: [{
-                    label: 'Vulnerabilities',
-                    data: [
-                        vulnerabilityTypes.critical || 0,
-                        vulnerabilityTypes.high || 0, 
-                        vulnerabilityTypes.medium || 0, 
-                        vulnerabilityTypes.low || 0
-                    ],
-                    backgroundColor: [
-                        '#d9534f',  // Red (Critical)
-                        '#f0ad4e',  // Orange (High)
-                        '#5bc0de',  // Blue (Medium)
-                        '#5cb85c'   // Green (Low)
-                    ],
-                    borderWidth: 1
-                }]
-            },
+    function createVulnDistributionChart(data) {
+        const ctx = document.getElementById('vulnDistributionChart')?.getContext('2d');
+        if (!ctx) {
+            console.error('Vulnerability Distribution Chart canvas context not found.');
+            return;
+        }
+
+        const chartData = {
+            labels: ['Critical', 'High', 'Medium', 'Low', 'Unknown'],
+            datasets: [{
+                label: 'Vulnerability Distribution',
+                data: [
+                    data.critical || 0,
+                    data.high || 0,
+                    data.medium || 0,
+                    data.low || 0,
+                    data.unknown || 0
+                ],
+                backgroundColor: [
+                    'rgba(220, 53, 69, 0.7)',  // Critical - Red
+                    'rgba(255, 159, 64, 0.7)', // High - Orange
+                    'rgba(255, 205, 86, 0.7)', // Medium - Yellow
+                    'rgba(75, 192, 192, 0.7)', // Low - Teal
+                    'rgba(108, 117, 125, 0.7)' // Unknown - Grey
+                ],
+                borderColor: [
+                    'rgba(220, 53, 69, 1)',
+                    'rgba(255, 159, 64, 1)',
+                    'rgba(255, 205, 86, 1)',
+                    'rgba(75, 192, 192, 1)',
+                    'rgba(108, 117, 125, 1)'
+                ],
+                borderWidth: 1
+            }]
+        };
+
+        if (vulnDistributionChartInstance) {
+            vulnDistributionChartInstance.destroy(); // Hủy biểu đồ cũ nếu có
+        }
+
+        vulnDistributionChartInstance = new Chart(ctx, {
+            type: 'doughnut', // Hoặc 'pie'
+            data: chartData,
             options: {
                 responsive: true,
+                maintainAspectRatio: false,
                 plugins: {
                     legend: {
-                        position: 'bottom'
+                        position: 'top',
+                    },
+                    title: {
+                        display: false,
+                        text: 'Vulnerability Distribution'
                     }
                 }
             }
         });
     }
     
-    function createScanActivityChart(scanDates) {
-        const ctx = document.getElementById('scanActivityChart').getContext('2d');
-        
-        // Get the dates sorted
-        const dates = Object.keys(scanDates).sort((a, b) => new Date(a) - new Date(b));
-        const scanCounts = dates.map(date => scanDates[date]);
-        
-        // If we have less than 7 dates, pad with empty ones
-        while (dates.length < 7) {
-            const lastDate = dates.length > 0 ? new Date(dates[dates.length - 1]) : new Date();
-            lastDate.setDate(lastDate.getDate() + 1);
-            dates.push(lastDate.toLocaleDateString());
-            scanCounts.push(0);
+    function createScanActivityChart(scanActivityData) {
+        const ctx = document.getElementById('scanActivityChart')?.getContext('2d');
+        if (!ctx) {
+            console.error('Scan Activity Chart canvas context not found.');
+            return;
         }
-        
-        // Limit to the 7 most recent dates
-        const recentDates = dates.slice(-7);
-        const recentCounts = scanCounts.slice(-7);
-        
-        new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: recentDates,
-                datasets: [{
-                    label: 'Scans',
-                    data: recentCounts,
-                    backgroundColor: '#007bff',
-                    borderWidth: 1
-                }]
-            },
+
+        const labels = Object.keys(scanActivityData).sort((a,b) => new Date(a) - new Date(b));
+        const dataPoints = labels.map(label => scanActivityData[label]);
+
+        const chartData = {
+            labels: labels,
+            datasets: [{
+                label: 'Scans Per Day',
+                data: dataPoints,
+                fill: false,
+                borderColor: 'rgb(75, 192, 192)',
+                tension: 0.1
+            }]
+        };
+
+        if (scanActivityChartInstance) {
+            scanActivityChartInstance.destroy();
+        }
+
+        scanActivityChartInstance = new Chart(ctx, {
+            type: 'line',
+            data: chartData,
             options: {
                 responsive: true,
+                maintainAspectRatio: false,
                 scales: {
                     y: {
                         beginAtZero: true,
-                        ticks: {
-                            precision: 0,
-                            stepSize: 1
-                        }
+                        ticks: { stepSize: 1 }
                     }
                 },
                 plugins: {
                     legend: {
-                        position: 'bottom'
+                        display: false
                     }
                 }
             }
@@ -468,7 +489,7 @@
         if (statusLower.includes('complet')) return 'bg-success';
         if (statusLower.includes('error')) return 'bg-danger';
         if (statusLower.includes('run')) return 'bg-primary';
-        if (statusLower.includes('pend')) return 'bg-warning';
+        if (statusLower.includes('pend')) return 'bg-warning text-dark'; // Added text-dark for better contrast on yellow
         
         return 'bg-secondary';
     }

@@ -147,6 +147,68 @@ def get_scan_details_from_db(scan_id):
         logger.error(f"Error fetching scan details for scan ID {scan_id} from DB: {str(e)}")
         return None
 
+def get_overall_vulnerability_stats():
+    """Tổng hợp số liệu thống kê phân phối lỗ hổng từ tất cả các báo cáo JSON đã hoàn thành."""
+    overall_stats = {
+        "critical": 0,
+        "high": 0,
+        "medium": 0,
+        "low": 0,
+        "unknown": 0, # Trong trường hợp không có severity hoặc summary
+        "total_reports_processed": 0,
+        "total_reports_failed_processing": 0
+    }
+    
+    conn = sqlite3.connect(DB_NAME)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    # Chỉ lấy các báo cáo từ các bản quét đã hoàn thành (status = "Completed")
+    cursor.execute("SELECT report_json_path FROM scans WHERE status = ? AND report_json_path IS NOT NULL", ("Completed",))
+    rows = cursor.fetchall()
+    conn.close()
+
+    for row in rows:
+        report_path = row['report_json_path']
+        if report_path and os.path.exists(report_path):
+            try:
+                with open(report_path, 'r', encoding='utf-8') as f:
+                    report_data = json.load(f)
+                
+                if isinstance(report_data, dict) and 'summary' in report_data and isinstance(report_data['summary'], dict):
+                    summary = report_data['summary']
+                    overall_stats["critical"] += summary.get('critical_count', 0)
+                    overall_stats["high"] += summary.get('high_count', 0)
+                    overall_stats["medium"] += summary.get('medium_count', 0)
+                    overall_stats["low"] += summary.get('low_count', 0)
+                    # Nếu có các mức severity khác trong summary, bạn có thể thêm vào đây
+                else:
+                    # Fallback: Nếu không có summary, thử đếm từ list vulnerabilities
+                    # Điều này làm cho hàm phức tạp hơn, nhưng an toàn hơn nếu summary không phải lúc nào cũng có
+                    # Dựa trên xác nhận của bạn, chúng ta giả định summary luôn có, nên phần này có thể bỏ qua hoặc giữ lại như một fallback
+                    if isinstance(report_data, dict) and 'vulnerabilities' in report_data and isinstance(report_data['vulnerabilities'], list):
+                        for vuln in report_data['vulnerabilities']:
+                            if isinstance(vuln, dict):
+                                severity = vuln.get('severity', 'unknown').lower()
+                                if severity in overall_stats:
+                                    overall_stats[severity] += 1
+                                else:
+                                    overall_stats["unknown"] += 1 # Đếm các severity không xác định
+                    else:
+                         overall_stats["unknown"] += 1 # Đếm file không có summary hoặc list vulnerabilities
+
+                overall_stats["total_reports_processed"] += 1
+            except json.JSONDecodeError:
+                logger.error(f"Error decoding JSON from report file: {report_path}")
+                overall_stats["total_reports_failed_processing"] += 1
+            except Exception as e:
+                logger.error(f"Error processing report file {report_path}: {e}")
+                overall_stats["total_reports_failed_processing"] += 1
+        else:
+            logger.warning(f"Report path {report_path} not found or is null for a completed scan.")
+            overall_stats["total_reports_failed_processing"] += 1
+            
+    return overall_stats
+
 class ThreadedScan:
     def __init__(self, scan_id, target_url, use_deepseek, scan_type):
         self.scan_id = scan_id
@@ -247,14 +309,10 @@ def index():
 
 @app.route('/dashboard')
 def dashboard():
-    # Lấy lịch sử quét và các lần quét đang chạy để hiển thị
     history = get_scan_history_from_db() 
-    
-    # Lấy trạng thái thực tế của các lần quét đang chạy từ current_scans
-    # (current_scans chứa các đối tượng ThreadedScan)
     active_scans_with_details = []
     for scan_id, scan_obj in current_scans.items():
-        if scan_obj.status in ["pending", "running"]: # Chỉ những cái thực sự đang chạy hoặc chờ
+        if scan_obj.status in ["pending", "running"]:
             active_scans_with_details.append({
                 "id": scan_obj.scan_id,
                 "db_id": scan_obj.db_scan_id,
@@ -264,11 +322,14 @@ def dashboard():
                 "progress": scan_obj.progress,
                 "start_time": scan_obj.start_time.strftime("%Y-%m-%d %H:%M:%S") if scan_obj.start_time else "N/A"
             })
+    
+    vulnerability_distribution = get_overall_vulnerability_stats()
             
     return render_template('dashboard.html', 
                            title="Dashboard", 
-                           scan_history=history[:10], # Chỉ hiển thị 10 mục gần nhất trên dashboard
-                           active_scans=active_scans_with_details)
+                           scan_history=history[:10],
+                           active_scans=active_scans_with_details,
+                           vulnerability_distribution=vulnerability_distribution)
 
 
 @app.route('/scan')
