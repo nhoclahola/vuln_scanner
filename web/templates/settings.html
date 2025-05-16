@@ -1,193 +1,127 @@
 {% extends "base.html" %}
 
-{% block title %}Settings - Security Scanner{% endblock %}
+{% block title %}Settings & Status - Security Scanner{% endblock %}
 
-{% block header_title %}Scanner Settings{% endblock %}
+{% block header_title %}Scanner Configuration & System Status{% endblock %}
 
 {% block content %}
-<div class="row">
-    <div class="col-lg-10 mx-auto">
-        <div class="row">
-            <!-- LLM API Settings -->
-            <div class="col-md-6 mb-4">
-                <div class="card h-100">
-                    <div class="card-header">
-                        <h5 class="card-title mb-0">LLM API Settings</h5>
-                    </div>
-                    <div class="card-body">
-                        <form id="llmSettingsForm">
-                            <div class="mb-3">
-                                <label class="form-label">Default LLM Provider</label>
-                                <div class="form-check">
-                                    <input class="form-check-input" type="radio" name="default_llm" id="defaultDeepseek" value="deepseek" checked>
-                                    <label class="form-check-label" for="defaultDeepseek">
-                                        DeepSeek
-                                    </label>
-                                </div>
-                                <div class="form-check mt-2">
-                                    <input class="form-check-input" type="radio" name="default_llm" id="defaultOpenAI" value="openai">
-                                    <label class="form-check-label" for="defaultOpenAI">
-                                        OpenAI
-                                    </label>
-                                </div>
-                            </div>
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-lg-9">
 
-                            <div class="mb-3">
-                                <label for="openaiApiKey" class="form-label">OpenAI API Key</label>
-                                <div class="input-group">
-                                    <span class="input-group-text"><i class="bi bi-key"></i></span>
-                                    <input type="password" class="form-control" id="openaiApiKey" name="openai_api_key" placeholder="sk-...">
-                                    <button class="btn btn-outline-secondary" type="button" onclick="togglePassword('openaiApiKey')">
-                                        <i class="bi bi-eye"></i>
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div class="mb-3">
-                                <label for="deepseekApiKey" class="form-label">DeepSeek API Key</label>
-                                <div class="input-group">
-                                    <span class="input-group-text"><i class="bi bi-key"></i></span>
-                                    <input type="password" class="form-control" id="deepseekApiKey" name="deepseek_api_key" placeholder="sk-...">
-                                    <button class="btn btn-outline-secondary" type="button" onclick="togglePassword('deepseekApiKey')">
-                                        <i class="bi bi-eye"></i>
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div class="mb-3">
-                                <label for="llmModel" class="form-label">LLM Model</label>
-                                <select class="form-select" id="llmModel" name="llm_model">
-                                    <option value="gpt-4">GPT-4</option>
-                                    <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
-                                    <option value="deepseek-chat">DeepSeek Chat</option>
-                                    <option value="deepseek-coder">DeepSeek Coder</option>
-                                </select>
-                            </div>
-
-                            <button type="submit" class="btn btn-primary">Save LLM Settings</button>
-                        </form>
-                    </div>
+            <!-- LLM API Key Configuration -->
+            <div class="card mb-4 shadow-sm">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="card-title mb-0"><i class="bi bi-key-fill me-2"></i>LLM API Key Configuration</h5>
                 </div>
-            </div>
+                <div class="card-body">
+                    <div id="llmSettingsAlertPlaceholder"></div> <!-- For success/error messages -->
 
-            <!-- Scan Settings -->
-            <div class="col-md-6 mb-4">
-                <div class="card h-100">
-                    <div class="card-header">
-                        <h5 class="card-title mb-0">Scan Settings</h5>
-                    </div>
-                    <div class="card-body">
-                        <form id="scanSettingsForm">
-                            <div class="mb-3">
-                                <label for="maxDepth" class="form-label">Max Crawl Depth</label>
-                                <input type="number" class="form-control" id="maxDepth" name="max_depth" min="1" max="10" value="3">
-                                <div class="form-text">Maximum depth for web crawler (1-10)</div>
-                            </div>
-
-                            <div class="mb-3">
-                                <label for="scanTimeout" class="form-label">Scan Timeout (seconds)</label>
-                                <input type="number" class="form-control" id="scanTimeout" name="scan_timeout" min="30" value="300">
-                                <div class="form-text">Maximum time for a scan to complete</div>
-                            </div>
-
-                            <div class="mb-3">
-                                <label for="userAgent" class="form-label">User Agent</label>
-                                <input type="text" class="form-control" id="userAgent" name="user_agent" value="Security Scanner v2.0">
-                            </div>
-
-                            <div class="mb-3">
-                                <label class="form-label">Scan Components</label>
-                                
-                                <div class="form-check form-switch">
-                                    <input class="form-check-input" type="checkbox" id="scanXss" name="scan_xss" checked>
-                                    <label class="form-check-label" for="scanXss">XSS Scanning</label>
-                                </div>
-                                
-                                <div class="form-check form-switch mt-2">
-                                    <input class="form-check-input" type="checkbox" id="scanSql" name="scan_sql" checked>
-                                    <label class="form-check-label" for="scanSql">SQL Injection</label>
-                                </div>
-                                
-                                <div class="form-check form-switch mt-2">
-                                    <input class="form-check-input" type="checkbox" id="scanHeaders" name="scan_headers" checked>
-                                    <label class="form-check-label" for="scanHeaders">Header Analysis</label>
-                                </div>
-                                
-                                <div class="form-check form-switch mt-2">
-                                    <input class="form-check-input" type="checkbox" id="scanJs" name="scan_js" checked>
-                                    <label class="form-check-label" for="scanJs">JavaScript Analysis</label>
-                                </div>
-                            </div>
-
-                            <button type="submit" class="btn btn-primary">Save Scan Settings</button>
-                        </form>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Export/Import Settings -->
-            <div class="col-md-6 mb-4">
-                <div class="card">
-                    <div class="card-header">
-                        <h5 class="card-title mb-0">Export/Import Settings</h5>
-                    </div>
-                    <div class="card-body">
+                    <form id="llmSettingsForm">
+                        <!-- OpenAI API Key -->
                         <div class="mb-3">
-                            <label class="form-label">Export Configuration</label>
-                            <div class="d-grid">
-                                <button type="button" id="exportSettingsBtn" class="btn btn-outline-primary">
-                                    <i class="bi bi-download me-2"></i> Export Settings
+                            <label for="openaiApiKeyInput" class="form-label">OpenAI API Key</label>
+                            <div class="input-group">
+                                <span class="input-group-text"><i class="bi bi-key"></i></span>
+                                <input type="password" class="form-control" id="openaiApiKeyInput" name="openai_api_key" 
+                                       placeholder="Enter your OpenAI API Key (e.g., sk-...)" 
+                                       value="{{ current_llm_configs.openai_api_key if current_llm_configs.openai_api_key != PLACEHOLDER_OPENAI_API_KEY else '' }}">
+                                <button class="btn btn-outline-secondary" type="button" onclick="togglePassword('openaiApiKeyInput')">
+                                    <i class="bi bi-eye"></i>
                                 </button>
                             </div>
+                             <div class="form-text">Leave blank if not using OpenAI or to reset to placeholder.</div>
                         </div>
 
+                        <!-- DeepSeek API Key -->
                         <div class="mb-3">
-                            <label for="importSettings" class="form-label">Import Configuration</label>
-                            <div class="input-group mb-3">
-                                <input type="file" class="form-control" id="importSettings" accept=".json">
-                                <button class="btn btn-outline-primary" type="button" id="importSettingsBtn">
-                                    <i class="bi bi-upload"></i> Import
+                            <label for="deepseekApiKeyInput" class="form-label">DeepSeek API Key</label>
+                            <div class="input-group">
+                                <span class="input-group-text"><i class="bi bi-key"></i></span>
+                                <input type="password" class="form-control" id="deepseekApiKeyInput" name="deepseek_api_key" 
+                                       placeholder="Enter your DeepSeek API Key (e.g., sk-...)" 
+                                       value="{{ current_llm_configs.deepseek_api_key if current_llm_configs.deepseek_api_key != PLACEHOLDER_DEEPSEEK_API_KEY else '' }}">
+                                <button class="btn btn-outline-secondary" type="button" onclick="togglePassword('deepseekApiKeyInput')">
+                                    <i class="bi bi-eye"></i>
                                 </button>
                             </div>
+                            <div class="form-text">Leave blank if not using DeepSeek or to reset to placeholder.</div>
                         </div>
+
+                        <!-- DeepSeek API Base URL -->
+                        <div class="mb-3">
+                            <label for="deepseekApiBaseInput" class="form-label">DeepSeek API Base URL</label>
+                            <div class="input-group">
+                                <span class="input-group-text"><i class="bi bi-link-45deg"></i></span>
+                                <input type="text" class="form-control" id="deepseekApiBaseInput" name="deepseek_api_base" 
+                                       placeholder="Enter DeepSeek API Base URL (optional)" 
+                                       value="{{ current_llm_configs.deepseek_api_base if current_llm_configs.deepseek_api_base != PLACEHOLDER_DEEPSEEK_API_BASE else '' }}">
+                            </div>
+                            <div class="form-text">Leave blank to use default or to reset to placeholder.</div>
+                        </div>
+
+                        <!-- OpenAI API Base URL -->
+                        <div class="mb-3">
+                            <label for="openaiApiBaseInput" class="form-label">OpenAI API Base URL</label>
+                            <div class="input-group">
+                                <span class="input-group-text"><i class="bi bi-link-45deg"></i></span>
+                                <input type="text" class="form-control" id="openaiApiBaseInput" name="openai_api_base" 
+                                       placeholder="Enter OpenAI API Base URL (optional)" 
+                                       value="{{ current_llm_configs.openai_api_base if current_llm_configs.openai_api_base != PLACEHOLDER_OPENAI_API_BASE else '' }}">
+                            </div>
+                            <div class="form-text">Leave blank to use default or to reset to placeholder (e.g., for Azure OpenAI, provide the full endpoint).</div>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary" id="saveLLMSettingsBtn">
+                            <i class="bi bi-save me-2"></i>Save LLM Settings
+                        </button>
+                    </form>
+                    <hr>
+                    <p class="text-muted small">
+                        Settings are stored in: <code>{{ settings_file_path_on_server_for_display }}</code> on the server.
+                        If you leave a field blank, the application will attempt to use a default placeholder for that key upon saving.
+                    </p>
+                </div>
+            </div>
+
+            <!-- System Health Status -->
+            <div class="card mb-4 shadow-sm">
+                <div class="card-header bg-secondary text-white">
+                    <h5 class="card-title mb-0"><i class="bi bi-heart-pulse-fill me-2"></i>System Health</h5>
+                </div>
+                <div class="card-body">
+                    {% if system_health_status_dict %}
+                    <div class="list-group">
+                        {% for item_name, health_info in system_health_status_dict.items() %}
+                        <div class="list-group-item list-group-item-action flex-column align-items-start">
+                            <div class="d-flex w-100 justify-content-between">
+                                <h6 class="mb-1">{{ health_info.label }}</h6>
+                                <span class="badge {% if health_info.ok %}bg-success-subtle text-success-emphasis{% else %}bg-danger-subtle text-danger-emphasis{% endif %} rounded-pill">
+                                   <i class="bi {% if health_info.ok %}bi-check-circle-fill{% else %}bi-x-octagon-fill{% endif %} me-1"></i>
+                                    {{ health_info.status_message }}
+                                </span>
+                            </div>
+                            {% if health_info.details %}
+                                <p class="mb-1 text-muted small">
+                                    Details: <em>{{ health_info.details }}</em>
+                                </p>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                         <div class="alert alert-warning" role="alert">
+                            Could not load system health status.
+                        </div>
+                    {% endif %}
+                    <div class="d-grid mt-3">
+                        <button type="button" id="refreshStatusBtn" class="btn btn-outline-primary" onclick="window.location.reload();">
+                            <i class="bi bi-arrow-clockwise me-2"></i>Refresh Status
+                        </button>
                     </div>
                 </div>
             </div>
 
-            <!-- System Status -->
-            <div class="col-md-6 mb-4">
-                <div class="card">
-                    <div class="card-header">
-                        <h5 class="card-title mb-0">System Status</h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="mb-3">
-                            <div class="d-flex justify-content-between align-items-center mb-2">
-                                <span>API Connection:</span>
-                                <span class="badge bg-success">Connected</span>
-                            </div>
-                            <div class="d-flex justify-content-between align-items-center mb-2">
-                                <span>Database:</span>
-                                <span class="badge bg-success">Operational</span>
-                            </div>
-                            <div class="d-flex justify-content-between align-items-center mb-2">
-                                <span>Scanner Modules:</span>
-                                <span class="badge bg-success">All Running</span>
-                            </div>
-                            <div class="d-flex justify-content-between align-items-center">
-                                <span>Last System Check:</span>
-                                <span>Today at 10:45 AM</span>
-                            </div>
-                        </div>
-                        
-                        <div class="d-grid">
-                            <button type="button" id="runSystemCheckBtn" class="btn btn-outline-primary">
-                                <i class="bi bi-arrow-repeat me-2"></i> Run System Check
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
         </div>
     </div>
 </div>
@@ -197,194 +131,79 @@
 <script>
     function togglePassword(inputId) {
         const input = document.getElementById(inputId);
-        const type = input.getAttribute('type') === 'password' ? 'text' : 'password';
-        input.setAttribute('type', type);
-        
+        if (!input) return;
         const icon = input.nextElementSibling.querySelector('i');
-        if (type === 'text') {
-            icon.classList.remove('bi-eye');
-            icon.classList.add('bi-eye-slash');
+        if (input.type === 'password') {
+            input.type = 'text';
+            if(icon) { icon.classList.remove('bi-eye'); icon.classList.add('bi-eye-slash'); }
         } else {
-            icon.classList.remove('bi-eye-slash');
-            icon.classList.add('bi-eye');
+            input.type = 'password';
+            if(icon) { icon.classList.remove('bi-eye-slash'); icon.classList.add('bi-eye'); }
         }
     }
-    
-    document.addEventListener('DOMContentLoaded', function() {
-        // Load settings
-        loadSettings();
-        
-        // Form submit handlers
-        document.getElementById('llmSettingsForm').addEventListener('submit', function(e) {
-            e.preventDefault();
-            saveSettings('llm', this);
-        });
-        
-        document.getElementById('scanSettingsForm').addEventListener('submit', function(e) {
-            e.preventDefault();
-            saveSettings('scan', this);
-        });
-        
-        // Export settings button
-        document.getElementById('exportSettingsBtn').addEventListener('click', exportSettings);
-        
-        // Import settings button
-        document.getElementById('importSettingsBtn').addEventListener('click', function() {
-            const fileInput = document.getElementById('importSettings');
-            if (fileInput.files.length > 0) {
-                importSettings(fileInput.files[0]);
-            }
-        });
-        
-        // System check button
-        document.getElementById('runSystemCheckBtn').addEventListener('click', runSystemCheck);
-    });
-    
-    function loadSettings() {
-        // In a real app, this would load from the server
-        // For this demo, we'll just show a loading indicator
-        
-        setTimeout(() => {
-            // Simulate loaded settings
-            document.getElementById('maxDepth').value = 3;
-            document.getElementById('scanTimeout').value = 300;
-            document.getElementById('userAgent').value = 'Security Scanner v2.0';
-            
-            // Set default LLM
-            document.getElementById('defaultDeepseek').checked = true;
-        }, 500);
-    }
-    
-    function saveSettings(type, form) {
-        // In a real app, this would save to the server
-        // For this demo, we'll just show an alert
-        
-        const formData = new FormData(form);
-        const settings = {};
-        
-        for (const [key, value] of formData.entries()) {
-            settings[key] = value;
-        }
-        
-        // Show success message
-        const alertDiv = document.createElement('div');
-        alertDiv.className = 'alert alert-success mt-3';
-        alertDiv.textContent = 'Settings saved successfully!';
-        
-        form.appendChild(alertDiv);
-        
-        // Remove alert after 3 seconds
-        setTimeout(() => {
-            alertDiv.remove();
-        }, 3000);
-        
-        console.log(`Saved ${type} settings:`, settings);
-    }
-    
-    function exportSettings() {
-        // In a real app, this would get settings from the server
-        // For this demo, we'll just create a sample settings object
-        
-        const settings = {
-            llm: {
-                default_llm: document.querySelector('input[name="default_llm"]:checked').value,
-                llm_model: document.getElementById('llmModel').value
-            },
-            scan: {
-                max_depth: parseInt(document.getElementById('maxDepth').value),
-                scan_timeout: parseInt(document.getElementById('scanTimeout').value),
-                user_agent: document.getElementById('userAgent').value,
-                components: {
-                    xss: document.getElementById('scanXss').checked,
-                    sql: document.getElementById('scanSql').checked,
-                    headers: document.getElementById('scanHeaders').checked,
-                    js: document.getElementById('scanJs').checked
-                }
-            }
-        };
-        
-        // Create a download link
-        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(settings, null, 2));
-        const downloadAnchorNode = document.createElement('a');
-        downloadAnchorNode.setAttribute("href", dataStr);
-        downloadAnchorNode.setAttribute("download", "scanner_settings.json");
-        document.body.appendChild(downloadAnchorNode);
-        downloadAnchorNode.click();
-        downloadAnchorNode.remove();
-    }
-    
-    function importSettings(file) {
-        const reader = new FileReader();
-        
-        reader.onload = function(e) {
-            try {
-                const settings = JSON.parse(e.target.result);
-                
-                // Apply settings to form fields
-                if (settings.llm) {
-                    if (settings.llm.default_llm) {
-                        document.querySelector(`input[name="default_llm"][value="${settings.llm.default_llm}"]`).checked = true;
-                    }
-                    if (settings.llm.llm_model) {
-                        document.getElementById('llmModel').value = settings.llm.llm_model;
-                    }
-                }
-                
-                if (settings.scan) {
-                    if (settings.scan.max_depth) {
-                        document.getElementById('maxDepth').value = settings.scan.max_depth;
-                    }
-                    if (settings.scan.scan_timeout) {
-                        document.getElementById('scanTimeout').value = settings.scan.scan_timeout;
-                    }
-                    if (settings.scan.user_agent) {
-                        document.getElementById('userAgent').value = settings.scan.user_agent;
-                    }
-                    if (settings.scan.components) {
-                        document.getElementById('scanXss').checked = !!settings.scan.components.xss;
-                        document.getElementById('scanSql').checked = !!settings.scan.components.sql;
-                        document.getElementById('scanHeaders').checked = !!settings.scan.components.headers;
-                        document.getElementById('scanJs').checked = !!settings.scan.components.js;
-                    }
-                }
-                
-                // Show success message
-                alert('Settings imported successfully!');
-                
-            } catch (error) {
-                alert('Error importing settings: ' + error.message);
-            }
-        };
-        
-        reader.readAsText(file);
-    }
-    
-    function runSystemCheck() {
-        const btn = document.getElementById('runSystemCheckBtn');
-        const originalText = btn.innerHTML;
-        
-        btn.disabled = true;
-        btn.innerHTML = '<i class="bi bi-arrow-repeat me-2 spin"></i> Running Check...';
-        
-        // Simulate check
-        setTimeout(() => {
-            btn.disabled = false;
-            btn.innerHTML = originalText;
-            
-            // Show success message
-            alert('System check completed successfully. All systems operational.');
-        }, 2000);
-    }
-</script>
 
-<style>
-    .spin {
-        animation: spin 1s linear infinite;
+    function showAlert(message, type = 'success') {
+        const placeholder = document.getElementById('llmSettingsAlertPlaceholder');
+        if (!placeholder) return;
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = [
+            `<div class="alert alert-${type} alert-dismissible fade show" role="alert">`,
+            `   <div>${message}</div>`,
+            '   <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>',
+            '</div>'
+        ].join('');
+        placeholder.innerHTML = ''; // Clear previous alerts
+        placeholder.append(wrapper);
     }
-    
-    @keyframes spin {
-        from { transform: rotate(0deg); }
-        to { transform: rotate(360deg); }
-    }
-</style>
+
+    document.addEventListener('DOMContentLoaded', function() {
+        const llmSettingsForm = document.getElementById('llmSettingsForm');
+        const saveLLMSettingsBtn = document.getElementById('saveLLMSettingsBtn');
+
+        if (llmSettingsForm && saveLLMSettingsBtn) {
+            llmSettingsForm.addEventListener('submit', function(event) {
+                event.preventDefault();
+                saveLLMSettingsBtn.disabled = true;
+                saveLLMSettingsBtn.innerHTML = 
+                    `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Saving...`;
+
+                const formData = {
+                    openai_api_key: document.getElementById('openaiApiKeyInput').value.trim(),
+                    deepseek_api_key: document.getElementById('deepseekApiKeyInput').value.trim(),
+                    deepseek_api_base: document.getElementById('deepseekApiBaseInput').value.trim(),
+                    openai_api_base: document.getElementById('openaiApiBaseInput').value.trim(),
+                };
+
+                fetch('{{ url_for("save_llm_settings") }}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(formData)
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        return response.json().then(err => { throw new Error(err.error || 'Failed to save settings.') });
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    showAlert(data.message || 'LLM settings saved successfully!', 'success');
+                    // Optionally, refresh part of the page or update displayed values if needed,
+                    // but a full reload on success might be simpler to reflect changes everywhere.
+                    // window.location.reload(); // Uncomment to reload the page on success
+                })
+                .catch(error => {
+                    showAlert('Error saving LLM settings: ' + error.message, 'danger');
+                    console.error('Error saving LLM settings:', error);
+                })
+                .finally(() => {
+                    saveLLMSettingsBtn.disabled = false;
+                    saveLLMSettingsBtn.innerHTML = '<i class="bi bi-save me-2"></i>Save LLM Settings';
+                });
+            });
+        }
+        console.log("Settings page loaded. LLM settings can be managed via the form.");
+    });
+</script>
 {% endblock %} 

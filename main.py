@@ -58,6 +58,43 @@ sys.path.insert(0, parent_dir)
 # SQLite Database setup
 DB_NAME = "vuln_scanner_history.db"
 
+SETTINGS_FILE_PATH = "settings.json"
+PLACEHOLDER_DEEPSEEK_API_KEY = "YOUR_DEEPSEEK_API_KEY_HERE"
+PLACEHOLDER_DEEPSEEK_API_BASE = "YOUR_DEEPSEEK_API_BASE_URL_HERE_OR_LEAVE_BLANK_FOR_DEFAULT"
+PLACEHOLDER_OPENAI_API_KEY = "YOUR_OPENAI_API_KEY_HERE"
+PLACEHOLDER_OPENAI_API_BASE = "YOUR_OPENAI_API_BASE_URL_HERE_OR_LEAVE_BLANK_FOR_DEFAULT"
+
+def load_app_settings(filename=SETTINGS_FILE_PATH):
+    """Tải cài đặt ứng dụng từ tệp JSON. Tự động tạo tệp với placeholder nếu không tồn tại."""
+    try:
+        with open(filename, 'r', encoding='utf-8') as f:
+            settings = json.load(f)
+            logger.info(f"Successfully loaded settings from {filename}")
+            return settings
+    except FileNotFoundError:
+        logger.warning(f"Settings file '{filename}' not found. Creating a new one with placeholder values.")
+        default_settings = {
+            "DEEPSEEK_API_KEY": PLACEHOLDER_DEEPSEEK_API_KEY,
+            "DEEPSEEK_API_BASE": PLACEHOLDER_DEEPSEEK_API_BASE,
+            "OPENAI_API_KEY": PLACEHOLDER_OPENAI_API_KEY,
+            "OPENAI_API_BASE": PLACEHOLDER_OPENAI_API_BASE
+        }
+        try:
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(default_settings, f, indent=4, ensure_ascii=False)
+            logger.info(f"Successfully created '{filename}'. "
+                        f"IMPORTANT: Please edit this file with your actual API credentials before running the scan.")
+        except Exception as e:
+            logger.error(f"Failed to create '{filename}': {e}. "
+                         f"Please create it manually with your API keys. Content structure: {default_settings}")
+        return default_settings # Return placeholders so the app can warn user if they try to run
+    except json.JSONDecodeError:
+        logger.error(f"Error decoding JSON from {filename}. Please ensure it's valid JSON. "
+                     f"If the file is corrupted, delete it and run the script again to recreate it.")
+        return {} # Return empty if JSON is invalid to prevent further errors with malformed settings
+
+APP_SETTINGS = load_app_settings()
+
 def init_db():
     """Khởi tạo cơ sở dữ liệu SQLite và bảng scans nếu chưa tồn tại."""
     conn = sqlite3.connect(DB_NAME)
@@ -177,7 +214,7 @@ from tools.security_tools import (
 )
 
 # Tải biến môi trường
-load_dotenv()
+# load_dotenv() # Removed: API keys will be loaded from settings.json
 
 def scan_website(target_url=None, use_deepseek=True, scan_type="basic", current_scan_id=None):
     """
@@ -208,53 +245,100 @@ def scan_website(target_url=None, use_deepseek=True, scan_type="basic", current_
     
     # Initialize LLM
     try:
+        llm = None # Initialize llm to None
         if use_deepseek:
-            # Set environment variables for DeepSeek
-            deepseek_api_key = os.getenv("DEEPSEEK_API_KEY")
-            deepseek_api_base = os.getenv("DEEPSEEK_API_BASE")
+            deepseek_api_key = APP_SETTINGS.get("DEEPSEEK_API_KEY")
+            deepseek_api_base = APP_SETTINGS.get("DEEPSEEK_API_BASE")
             
-            if not deepseek_api_key or not deepseek_api_base:
-                logger.warning("Missing DeepSeek API key or API base. Switching to OpenAI.")
+            is_ds_key_invalid = not deepseek_api_key or deepseek_api_key == PLACEHOLDER_DEEPSEEK_API_KEY
+            is_ds_base_invalid_for_custom = deepseek_api_base == PLACEHOLDER_DEEPSEEK_API_BASE # Placeholder means "use default" or "needs config"
+            # Deepseek base can be empty to use default, so only placeholder is strictly invalid for custom setting
+            
+            if is_ds_key_invalid:
+                logger.warning(
+                    "DeepSeek API key is missing or uses placeholder. "
+                    "Switching to OpenAI if configured."
+                )
                 use_deepseek = False
             else:
-                # Set global environment variables for litellm to use
-                os.environ["OPENAI_API_KEY"] = deepseek_api_key
-                os.environ["OPENAI_API_BASE"] = deepseek_api_base
+                llm_ds_params = {
+                    "model": "deepseek-chat",
+                    "provider": "openai", # litellm uses openai provider for deepseek
+                    "api_key": deepseek_api_key,
+                    "temperature": 0.7,
+                    "context_window": 128000,
+                    "max_tokens": 4096
+                }
+                if deepseek_api_base and not is_ds_base_invalid_for_custom and deepseek_api_base.strip() != "":
+                    llm_ds_params["api_base"] = deepseek_api_base
+                    os.environ["OPENAI_API_BASE"] = deepseek_api_base # For litellm if it relies on this for deepseek
+                    logger.info(f"Using DeepSeek API with custom base {deepseek_api_base} and 128K context window")
+                else:
+                    # If OPENAI_API_BASE was set by previous OpenAI config, clear it for Deepseek default
+                    if "OPENAI_API_BASE" in os.environ: del os.environ["OPENAI_API_BASE"]
+                    logger.info("Using DeepSeek API with default base and 128K context window")
                 
-                llm = LLM(
-                    model="deepseek-chat",
-                    provider="openai",
-                    api_key=deepseek_api_key,
-                    api_base=deepseek_api_base,
-                    temperature=0.7,
-                    context_window=128000,
-                    max_tokens=4096
-                )
-                logger.info("Using DeepSeek API with 128K context window")
+                os.environ["OPENAI_API_KEY"] = deepseek_api_key # For litellm
+                llm = LLM(**llm_ds_params)
         
-        if not use_deepseek:
-            openai_api_key = os.getenv("OPENAI_API_KEY")
-            if not openai_api_key:
-                err_msg = "Error: Missing OpenAI API key. Please check your .env file"
+        if not use_deepseek: # This means either OpenAI was chosen, or DeepSeek failed
+            openai_api_key = APP_SETTINGS.get("OPENAI_API_KEY")
+            openai_api_base = APP_SETTINGS.get("OPENAI_API_BASE")
+
+            is_openai_key_invalid = not openai_api_key or openai_api_key == PLACEHOLDER_OPENAI_API_KEY
+            
+            # OpenAI base can be empty or placeholder to use default. It's only an issue if it's set to placeholder but not the one indicating default.
+            # For OpenAI, typically users leave it blank for the default. The placeholder helps guide them.
+            should_use_custom_openai_base = (openai_api_base and 
+                                             openai_api_base != PLACEHOLDER_OPENAI_API_BASE and 
+                                             openai_api_base.strip() != "")
+
+            if is_openai_key_invalid:
+                err_msg = "Error: OpenAI API key is missing or uses a placeholder value in settings.json."
+                # Check if DeepSeek was also unconfigured
+                ds_key_check = APP_SETTINGS.get("DEEPSEEK_API_KEY")
+                if not ds_key_check or ds_key_check == PLACEHOLDER_DEEPSEEK_API_KEY:
+                     err_msg = ("Error: API keys for both DeepSeek and OpenAI are missing or use placeholder values "
+                                "in settings.json. Please configure at least one provider.")
                 logger.error(err_msg)
                 return err_msg, None, None
             
+            llm_openai_params = {
+                "model": "gpt-3.5-turbo",
+                "provider": "openai",
+                "api_key": openai_api_key,
+                "temperature": 0.7,
+                "context_window": 16000,
+                "max_tokens": 4096
+            }
+
+            if should_use_custom_openai_base:
+                llm_openai_params["api_base"] = openai_api_base
+                os.environ["OPENAI_API_BASE"] = openai_api_base
+                logger.info(f"Using OpenAI API with custom base URL: {openai_api_base} and 16K context window")
+            else:
+                # If OPENAI_API_BASE was set by DeepSeek (as it also uses this env var for litellm), clear it for OpenAI default
+                # This case is tricky because both might use the same env var for litellm.
+                # The LLM constructor param `api_base` should take precedence.
+                if "OPENAI_API_BASE" in os.environ:
+                    # Only delete if it wasn't explicitly set for OpenAI default (which means it should be unset)
+                    # Or if it was set by Deepseek custom base
+                    current_env_base = os.environ["OPENAI_API_BASE"]
+                    ds_base_val = APP_SETTINGS.get("DEEPSEEK_API_BASE")
+                    if current_env_base == ds_base_val and ds_base_val != openai_api_base : # if env was set by deepseek and not same as intended openai base
+                         del os.environ["OPENAI_API_BASE"]
+                logger.info("Using OpenAI API with default base URL and 16K context window")
+            
             os.environ["OPENAI_API_KEY"] = openai_api_key
-            llm = LLM(
-                model="gpt-3.5-turbo",
-                provider="openai",
-                api_key=openai_api_key,
-                temperature=0.7,
-                context_window=16000,
-                max_tokens=4096
-            )
-            logger.info("Using OpenAI API with 16K context window")
-    except Exception as e:
-        err_msg = f"Error initializing LLM: {str(e)}"
-        logger.error(err_msg, exc_info=True)
-        return err_msg, None, None
-    
-    try:
+            llm = LLM(**llm_openai_params)
+
+        if llm is None:
+            # This case should ideally be caught by the key checks above, 
+            # but as a fallback if neither use_deepseek nor not use_deepseek path initializes llm.
+            final_err_msg = "Error: LLM could not be initialized. API keys for both providers might be missing or invalid in settings.json."
+            logger.error(final_err_msg)
+            return final_err_msg, None, None
+
         os.environ["TARGET_URL"] = target_url
         
         crawler_tools = [web_crawler, javascript_analyzer]

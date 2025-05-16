@@ -21,8 +21,27 @@ logging.basicConfig(
 )
 logger = logging.getLogger('vuln_scanner_web')
 
-# Import hàm scan_website từ main.py
-from main import scan_website, format_vulnerability_report, init_db, log_scan_start, log_scan_end, DB_NAME
+# Import từ main.py
+try:
+    from main import scan_website, format_vulnerability_report, init_db, log_scan_start, log_scan_end, DB_NAME, \
+                     APP_SETTINGS, SETTINGS_FILE_PATH, load_app_settings as main_load_app_settings, \
+                     PLACEHOLDER_DEEPSEEK_API_KEY, \
+                     PLACEHOLDER_DEEPSEEK_API_BASE, \
+                     PLACEHOLDER_OPENAI_API_KEY, \
+                     PLACEHOLDER_OPENAI_API_BASE
+except ImportError as e:
+    logger.error(f"Could not import necessary components from main.py: {e}. Web app functionality will be limited.")
+    APP_SETTINGS = {}
+    SETTINGS_FILE_PATH = "settings.json (Lỗi import từ main.py)"
+    DB_NAME = "vuln_scanner_history.db (Lỗi import từ main.py)"
+    PLACEHOLDER_DEEPSEEK_API_KEY = "NOT_CONFIGURED_IMPORT_ERROR"
+    PLACEHOLDER_DEEPSEEK_API_BASE = "NOT_CONFIGURED_IMPORT_ERROR"
+    PLACEHOLDER_OPENAI_API_KEY = "NOT_CONFIGURED_IMPORT_ERROR"
+    PLACEHOLDER_OPENAI_API_BASE = "NOT_CONFIGURED_IMPORT_ERROR"
+    main_load_app_settings = lambda: {} # Mock function
+    def scan_website(*args, **kwargs):
+        logger.error("scan_website not available due to import error from main.py")
+        return "Error: Scan function not available.", None, None
 
 app = Flask(__name__, 
             static_folder='web/static',
@@ -31,14 +50,14 @@ app = Flask(__name__,
 # Queue và biến toàn cục để lưu output stream
 output_queue = queue.Queue()
 current_scans = {}
-scan_history = []
+# scan_history = [] # Sẽ được tải từ DB
 
 # Hàm tương tác với SQLite database
 def get_scan_history_from_db():
     """Lấy lịch sử quét từ database SQLite"""
     try:
         conn = sqlite3.connect(DB_NAME)
-        conn.row_factory = sqlite3.Row  # Để kết quả trả về dạng dict
+        conn.row_factory = sqlite3.Row 
         cursor = conn.cursor()
         cursor.execute("""
             SELECT id, target_url, scan_type, scan_timestamp, status, 
@@ -49,59 +68,46 @@ def get_scan_history_from_db():
         rows = cursor.fetchall()
         conn.close()
         
-        # Chuyển đổi rows thành list of dict
         history = []
         for row in rows:
             item = dict(row)
-            
-            # Xử lý timestamp để đảm bảo client có thể hiển thị đúng
-            if item['scan_timestamp']:
-                # Nếu là chuỗi định dạng ngày tháng, chuyển thành timestamp số để client dễ xử lý
-                if isinstance(item['scan_timestamp'], str):
-                    try:
-                        dt = datetime.strptime(item['scan_timestamp'], "%Y-%m-%d %H:%M:%S")
-                        item['timestamp'] = int(dt.timestamp())
-                    except (ValueError, TypeError):
-                        # Nếu không phải định dạng chuẩn, giữ nguyên
-                        item['timestamp'] = item['scan_timestamp']
-                else:
-                    # Nếu đã là số, gán trực tiếp
-                    item['timestamp'] = item['scan_timestamp']
+            if item.get('scan_timestamp'):
+                try:
+                    dt = datetime.strptime(item['scan_timestamp'], "%Y-%m-%d %H:%M:%S")
+                    item['timestamp'] = int(dt.timestamp())
+                except (ValueError, TypeError):
+                    item['timestamp'] = item['scan_timestamp'] # Giữ nguyên nếu không parse được
             else:
-                # Nếu không có timestamp, dùng thời gian hiện tại
                 item['timestamp'] = int(time.time())
             
-            # Tính thời gian quét từ scan_timestamp và end_time
-            if item['scan_timestamp'] and item['end_time']:
+            if item.get('scan_timestamp') and item.get('end_time'):
                 try:
-                    # Chuyển đổi chuỗi thành đối tượng datetime
                     start_time = datetime.strptime(item['scan_timestamp'], "%Y-%m-%d %H:%M:%S")
                     end_time = datetime.strptime(item['end_time'], "%Y-%m-%d %H:%M:%S")
-                    
-                    # Tính thời gian quét (giây)
                     scan_duration = (end_time - start_time).total_seconds()
                     item['duration'] = round(scan_duration, 2)
                 except Exception as e:
-                    logger.error(f"Error calculating scan duration: {str(e)}")
+                    logger.error(f"Error calculating scan duration for history item {item.get('id')}: {str(e)}")
                     item['duration'] = 0
             else:
                 item['duration'] = 0
             
-            # Thêm thông tin về số lượng lỗ hổng từ file report nếu có
-            if item['report_json_path'] and os.path.exists(item['report_json_path']):
+            if item.get('report_json_path') and os.path.exists(item['report_json_path']):
                 try:
                     with open(item['report_json_path'], 'r', encoding='utf-8') as f:
                         report_data = json.load(f)
-                        # Lấy số lượng lỗ hổng từ summary nếu có
                         if 'summary' in report_data and 'total_vulnerabilities' in report_data['summary']:
                             item['vulnerabilities'] = report_data['summary']['total_vulnerabilities']
                         elif 'vulnerabilities' in report_data and isinstance(report_data['vulnerabilities'], list):
                             item['vulnerabilities'] = len(report_data['vulnerabilities'])
+                        else:
+                            item['vulnerabilities'] = 0 
                 except Exception as e:
-                    logger.error(f"Error reading report file {item['report_json_path']}: {str(e)}")
-            
+                    logger.error(f"Error reading report file {item['report_json_path']} for history item {item.get('id')}: {str(e)}")
+                    item['vulnerabilities'] = 0
+            else:
+                item['vulnerabilities'] = 0
             history.append(item)
-            
         return history
     except Exception as e:
         logger.error(f"Error fetching scan history from DB: {str(e)}")
@@ -124,34 +130,28 @@ def get_scan_details_from_db(scan_id):
         
         if row:
             scan_details = dict(row)
-            
-            # Tính thời gian quét từ scan_timestamp và end_time
-            if scan_details['scan_timestamp'] and scan_details['end_time']:
+            if scan_details.get('scan_timestamp') and scan_details.get('end_time'):
                 try:
-                    # Chuyển đổi chuỗi thành đối tượng datetime
                     start_time = datetime.strptime(scan_details['scan_timestamp'], "%Y-%m-%d %H:%M:%S")
                     end_time = datetime.strptime(scan_details['end_time'], "%Y-%m-%d %H:%M:%S")
-                    
-                    # Tính thời gian quét (giây)
                     scan_duration = (end_time - start_time).total_seconds()
                     scan_details['duration'] = round(scan_duration, 2)
                 except Exception as e:
-                    logger.error(f"Error calculating scan duration: {str(e)}")
+                    logger.error(f"Error calculating scan duration for scan ID {scan_id}: {str(e)}")
                     scan_details['duration'] = 0
             else:
                 scan_details['duration'] = 0
-                
             return scan_details
         return None
     except Exception as e:
-        logger.error(f"Error fetching scan details from DB: {str(e)}")
+        logger.error(f"Error fetching scan details for scan ID {scan_id} from DB: {str(e)}")
         return None
 
 class ThreadedScan:
     def __init__(self, scan_id, target_url, use_deepseek, scan_type):
         self.scan_id = scan_id
         self.target_url = target_url
-        self.use_deepseek = use_deepseek
+        self.use_deepseek = use_deepseek # Sẽ được truyền từ /api/scan
         self.scan_type = scan_type
         self.status = "pending"
         self.result = None
@@ -160,662 +160,527 @@ class ThreadedScan:
         self.end_time = None
         self.progress = 0
         self.report_file = None
-        self.db_scan_id = None  # Lưu ID của bản ghi trong database
+        self.db_scan_id = None 
         
     def run(self):
         self.status = "running"
+        original_stdout = sys.stdout
+        original_stderr = sys.stderr
         try:
-            # Redirect stdout to capture output
-            original_stdout = sys.stdout
-            original_stderr = sys.stderr
             sys.stdout = OutputCapture(self)
             sys.stderr = OutputCapture(self)
             
-            # Ghi lại thông tin quét vào database
-            self.db_scan_id = log_scan_start(self.target_url, self.scan_type)
+            # log_scan_start được import từ main
+            self.db_scan_id = log_scan_start(self.target_url, self.scan_type) 
             
-            # Run the scan
-            logger.info(f"Starting scan for {self.target_url}")
+            logger.info(f"ThreadedScan: Starting scan for {self.target_url} with db_scan_id: {self.db_scan_id}, use_deepseek: {self.use_deepseek}, scan_type: {self.scan_type}")
+            
+            # scan_website được import từ main
             status_message, json_report_path, md_report_path = scan_website(
-                self.target_url, 
-                self.use_deepseek, 
-                self.scan_type,
+                target_url=self.target_url, 
+                use_deepseek=self.use_deepseek, 
+                scan_type=self.scan_type,
                 current_scan_id=self.db_scan_id
             )
             
             self.result = status_message
             self.status = "completed"
+            self.progress = 100
+            self.end_time = datetime.now()
             
-            # Lưu đường dẫn đến báo cáo
             self.report_file = {
                 "json": json_report_path,
                 "markdown": md_report_path
             }
-                
-            # Calculate duration
-            duration = (self.end_time or datetime.now()) - self.start_time
-            duration_seconds = duration.total_seconds()
             
-            # Thêm vào scan_history (cho khả năng tương thích ngược)
-            scan_record = {
-                "id": self.scan_id,
-                "db_id": self.db_scan_id,
-                "target_url": self.target_url,
-                "scan_type": self.scan_type,
-                "timestamp": int(time.mktime(self.start_time.timetuple())),
-                "duration": round(duration_seconds, 2),
-                "status": "completed",
-                "report_json_path": json_report_path,
-                "report_md_path": md_report_path
-            }
-            scan_history.append(scan_record)
-            
-            # Save scan history to file (cho khả năng tương thích ngược)
-            try:
-                with open('scan_history.json', 'w') as f:
-                    json.dump(scan_history, f, indent=2)
-            except Exception as e:
-                logger.error(f"Error saving scan history: {str(e)}")
-            
-            # Ghi log kết thúc quét và lưu báo cáo vào database
+            # log_scan_end được import từ main
             if self.db_scan_id:
-                log_scan_end(self.db_scan_id, json_report_path, md_report_path)
+                 # log_scan_end trong main.py đã tự động cập nhật end_time
+                 # Nó mong muốn status, report_json_path, report_md_path, scan_id
+                 # status_message ở đây là thông báo chung, status trong DB nên là "Completed"
+                log_scan_end(self.db_scan_id, "Completed", json_report_path, md_report_path)
             
-            self.progress = 100  # Set progress to 100% when complete
-            self.end_time = datetime.now()
         except Exception as e:
             self.status = "failed"
-            self.result = f"Error: {str(e)}"
-            logger.error(f"Scan error: {str(e)}", exc_info=True)
+            self.result = f"Error during scan: {str(e)}"
+            self.end_time = datetime.now()
+            logger.error(f"Scan error in ThreadedScan for {self.target_url}: {str(e)}", exc_info=True)
             if self.db_scan_id:
-                # Update DB record to indicate failure
-                try:
-                    conn = sqlite3.connect(DB_NAME)
-                    cursor = conn.cursor()
-                    cursor.execute("""
-                        UPDATE scans 
-                        SET status = ?, end_time = ?
-                        WHERE id = ?
-                    """, ("failed", datetime.now().strftime("%Y-%m-%d %H:%M:%S"), self.db_scan_id))
-                    conn.commit()
-                    conn.close()
-                except Exception as db_error:
-                    logger.error(f"Failed to update scan status in DB: {str(db_error)}")
+                # log_scan_end trong main.py cũng xử lý trường hợp Error
+                log_scan_end(self.db_scan_id, "Error") # Chỉ truyền status "Error"
         finally:
-            # Restore stdout
             sys.stdout = original_stdout
             sys.stderr = original_stderr
+            if self.scan_id in current_scans: # Dọn dẹp current_scans khi luồng kết thúc
+                 # current_scans[self.scan_id] is the ThreadedScan object itself
+                 # We might want to keep it for a while for status checks, or remove it if status is final
+                 # For now, let's assume it stays until explicitly cleared or overwritten by a new scan with same ID (if IDs are reused)
+                 pass
+
 
 class OutputCapture(object):
     def __init__(self, scan):
         self.scan = scan
-    
-    def write(self, text):
-        if text.strip():  # Ignore empty lines
-            self.scan.output_capture.append(text)
-            output_queue.put({"scan_id": self.scan.scan_id, "text": text})
-            # Update progress based on certain keywords
-            if "Target URL:" in text:
-                self.scan.progress = 5
-            elif "Web Crawler" in text:
-                self.scan.progress = 10
-            elif "Crawling " in text:
-                # Don't regress progress if already higher
-                if self.scan.progress < 15:
-                    self.scan.progress = 15
-            elif "Analyzing HTTP headers" in text:
-                self.scan.progress = 25
-            elif "Discovering endpoints" in text:
-                self.scan.progress = 40
-            elif "Analyzing JavaScript" in text:
-                self.scan.progress = 50
-            elif "Scanning for XSS" in text:
-                self.scan.progress = 60
-            elif "Scanning for SQL" in text:
-                self.scan.progress = 70
-            elif "Scanning for" in text and "vulnerabilities" in text:
-                # For other vulnerability types
-                if self.scan.progress < 75:
-                    self.scan.progress = 75
-            elif "Creating comprehensive summary" in text or "Create a comprehensive summary" in text:
-                self.scan.progress = 80
-            elif "formatting" in text.lower() and "report" in text.lower():
-                self.scan.progress = 85
-            elif "Generating report" in text or "Creating report" in text:
-                self.scan.progress = 90
-            elif "Report saved" in text:
-                self.scan.progress = 100
-            # Fallback progress increments based on CrewAI markers
-            elif "Agent:" in text and self.scan.progress < 90:
-                # Small progress increment for any agent activity
-                self.scan.progress += 2
-                # Cap at 95 for agent activity (saving 100 for completion)
-                if self.scan.progress > 95:
-                    self.scan.progress = 95
-        return len(text)
-    
-    def flush(self):
-        pass
+        self.buffer = ""
 
-# Đường dẫn trang chủ và dashboard
+    def write(self, text):
+        # Đẩy output vào queue để stream tới client nếu cần
+        output_queue.put(text)
+        # Lưu lại output cho scan cụ thể này
+        if self.scan:
+            self.scan.output_capture.append(text)
+        # Ghi vào log file của web app
+        # sys.__stdout__.write(text) # Tránh vòng lặp vô hạn nếu logger cũng ghi ra stdout
+        logger.debug(f"Captured output: {text.strip()}") # Ghi vào log dưới dạng debug
+
+    def flush(self):
+        # sys.__stdout__.flush()
+        pass # Flask xử lý flush
+
+    def isatty(self): # Cần cho một số thư viện
+        return False
+
+# Routes
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return redirect(url_for('dashboard'))
 
 @app.route('/dashboard')
 def dashboard():
-    return render_template('dashboard.html')
+    # Lấy lịch sử quét và các lần quét đang chạy để hiển thị
+    history = get_scan_history_from_db() 
+    
+    # Lấy trạng thái thực tế của các lần quét đang chạy từ current_scans
+    # (current_scans chứa các đối tượng ThreadedScan)
+    active_scans_with_details = []
+    for scan_id, scan_obj in current_scans.items():
+        if scan_obj.status in ["pending", "running"]: # Chỉ những cái thực sự đang chạy hoặc chờ
+            active_scans_with_details.append({
+                "id": scan_obj.scan_id,
+                "db_id": scan_obj.db_scan_id,
+                "target_url": scan_obj.target_url,
+                "scan_type": scan_obj.scan_type,
+                "status": scan_obj.status,
+                "progress": scan_obj.progress,
+                "start_time": scan_obj.start_time.strftime("%Y-%m-%d %H:%M:%S") if scan_obj.start_time else "N/A"
+            })
+            
+    return render_template('dashboard.html', 
+                           title="Dashboard", 
+                           scan_history=history[:10], # Chỉ hiển thị 10 mục gần nhất trên dashboard
+                           active_scans=active_scans_with_details)
 
-# Đường dẫn cho trang quét
+
 @app.route('/scan')
 def scan_page():
-    return render_template('scan.html')
+    return render_template('scan.html', title="Start New Scan")
 
-# API để bắt đầu quét
 @app.route('/api/scan', methods=['POST'])
 def start_scan():
-    target_url = request.form.get('url')
-    use_openai = request.form.get('llm_provider') == 'openai'
-    scan_type = request.form.get('scan_type', 'basic')
-    
+    data = request.get_json()
+    target_url = data.get('target_url')
+    scan_type = data.get('scan_type', 'basic') # 'basic' or 'full'
+    # Lấy lựa chọn LLM từ form, mặc định là deepseek nếu không có
+    llm_choice = data.get('llm_provider', 'deepseek') 
+    use_deepseek_flag = True if llm_choice == 'deepseek' else False
+
     if not target_url:
-        return jsonify({"error": "URL is required"}), 400
+        return jsonify({"error": "Target URL is required"}), 400
+
+    # Tạo một ID duy nhất cho lần quét này (ví dụ: dựa trên timestamp)
+    # scan_id = str(int(time.time())) # ID này cho web app, db_scan_id là từ DB
+    scan_id = f"webscan_{int(time.time() * 1000)}"
+
+
+    # Kiểm tra API keys trước khi bắt đầu luồng (nếu có thể)
+    # Logic này đã có trong scan_website, nhưng một check sơ bộ ở đây có thể hữu ích
+    # Tuy nhiên, để tránh lặp code, ta có thể dựa vào check trong scan_website
+    # và scan_website sẽ trả về lỗi nếu key không hợp lệ.
+
+    scan_thread_obj = ThreadedScan(scan_id, target_url, use_deepseek_flag, scan_type)
+    current_scans[scan_id] = scan_thread_obj
     
-    # Generate a unique scan ID
-    scan_id = f"{int(time.time())}"
-    
-    # Create threaded scan
-    scan = ThreadedScan(
-        scan_id=scan_id,
-        target_url=target_url,
-        use_deepseek=not use_openai,
-        scan_type=scan_type
-    )
-    
-    # Add to current scans
-    current_scans[scan_id] = scan
-    
-    # Start scanning in a new thread
-    thread = threading.Thread(target=scan.run)
-    thread.daemon = True
+    thread = threading.Thread(target=scan_thread_obj.run)
+    thread.daemon = True # Để luồng tự thoát khi app chính thoát
     thread.start()
     
-    return jsonify({"scan_id": scan_id})
+    logger.info(f"Scan initiated for {target_url} with web_scan_id: {scan_id}, use_deepseek: {use_deepseek_flag}, scan_type: {scan_type}")
+    return jsonify({"message": "Scan started", "scan_id": scan_id, "status_url": url_for('scan_status', scan_id=scan_id)})
 
-# API để kiểm tra trạng thái quét
 @app.route('/api/scan/<scan_id>')
 def scan_status(scan_id):
-    if scan_id in current_scans:
-        scan = current_scans[scan_id]
-        
-        # Calculate elapsed time
-        elapsed = (scan.end_time if scan.end_time else datetime.now()) - scan.start_time
-        elapsed_str = str(elapsed).split('.')[0]  # Remove microseconds
-        
-        # Nếu có db_scan_id, lấy thêm thông tin từ database
-        db_scan_details = None
-        if hasattr(scan, 'db_scan_id') and scan.db_scan_id:
-            db_scan_details = get_scan_details_from_db(scan.db_scan_id)
-        
-        report_json = None
-        report_md = None
-        
-        # Ưu tiên lấy từ scan object trước
-        if scan.report_file and isinstance(scan.report_file, dict):
-            report_json = scan.report_file.get('json')
-            report_md = scan.report_file.get('markdown')
-        elif scan.report_file and isinstance(scan.report_file, str):
-            # Tương thích ngược với code cũ
-            report_json = scan.report_file
-        
-        # Nếu không có từ scan object, thử lấy từ database
-        if db_scan_details:
-            if not report_json and db_scan_details.get('report_json_path'):
-                report_json = db_scan_details.get('report_json_path')
-            if not report_md and db_scan_details.get('report_md_path'):
-                report_md = db_scan_details.get('report_md_path')
-                
-            # Nếu scan đã hoàn thành, lấy thời gian quét đã tính toán từ database
-            if scan.status == "completed" and db_scan_details.get('duration'):
-                elapsed_str = f"{db_scan_details.get('duration')} seconds"
-        
-        return jsonify({
-            "scan_id": scan_id,
-            "db_scan_id": scan.db_scan_id if hasattr(scan, 'db_scan_id') else None,
-            "status": scan.status,
-            "target_url": scan.target_url,
-            "progress": scan.progress,
-            "elapsed_time": elapsed_str,
-            "report_json_path": report_json,
-            "report_md_path": report_md
-        })
+    scan = current_scans.get(scan_id)
+    if not scan:
+        # Nếu không có trong current_scans, thử tìm trong DB (có thể là scan đã hoàn thành từ phiên trước)
+        # Đây là một cải tiến, hiện tại current_scans chỉ chứa các scan của phiên này.
+        # Để đơn giản, nếu không có trong current_scans, coi như không tìm thấy cho API status này.
+        return jsonify({"error": "Scan not found or already completed and cleared from active list"}), 404
     
-    return jsonify({"error": "Scan not found"}), 404
+    return jsonify({
+        "scan_id": scan.scan_id,
+        "db_scan_id": scan.db_scan_id,
+        "target_url": scan.target_url,
+        "scan_type": scan.scan_type,
+        "status": scan.status,
+        "progress": scan.progress, # Giả sử có thuộc tính progress trong ThreadedScan
+        "result": scan.result, # Kết quả cuối cùng (thông báo hoặc lỗi)
+        "start_time": scan.start_time.isoformat() if scan.start_time else None,
+        "end_time": scan.end_time.isoformat() if scan.end_time else None,
+        "report_file": scan.report_file
+    })
 
-# API để lấy output của quét
 @app.route('/api/scan/<scan_id>/output')
 def scan_output(scan_id):
-    if scan_id in current_scans:
-        scan = current_scans[scan_id]
-        return jsonify({"output": scan.output_capture})
-    
-    return jsonify({"error": "Scan not found"}), 404
+    scan = current_scans.get(scan_id)
+    if not scan:
+        return jsonify({"error": "Scan not found"}), 404
+    return Response("".join(scan.output_capture), mimetype='text/plain')
 
-# API để lấy kết quả quét
+
 @app.route('/api/scan/<scan_id>/result')
 def scan_result(scan_id):
-    if scan_id in current_scans:
-        scan = current_scans[scan_id]
-        
-        if scan.status == "completed":
-            # Lấy thông tin báo cáo
-            report_json = None
-            report_md = None
-            
-            # Ưu tiên lấy từ scan object
-            if scan.report_file and isinstance(scan.report_file, dict):
-                report_json = scan.report_file.get('json')
-                report_md = scan.report_file.get('markdown')
-            elif scan.report_file and isinstance(scan.report_file, str):
-                # Tương thích ngược với code cũ
-                report_json = scan.report_file
-            
-            # Nếu có db_scan_id, kiểm tra thông tin từ database
-            if hasattr(scan, 'db_scan_id') and scan.db_scan_id:
-                db_scan_details = get_scan_details_from_db(scan.db_scan_id)
-                if db_scan_details:
-                    if not report_json and db_scan_details.get('report_json_path'):
-                        report_json = db_scan_details.get('report_json_path')
-                    if not report_md and db_scan_details.get('report_md_path'):
-                        report_md = db_scan_details.get('report_md_path')
-            
-            # Đọc nội dung báo cáo từ file
-            formatted_result = None
-            if report_json and os.path.exists(report_json):
+    # This route might be redundant if /api/scan/<scan_id> already returns the final result.
+    # However, it could be used specifically to fetch only the result field when the scan is completed/failed.
+    scan = current_scans.get(scan_id)
+    if not scan:
+        db_scan_details = get_scan_details_from_db(scan_id) # Thử tìm ID này trong DB (nếu scan_id là db_id)
+        if db_scan_details:
+             # Cần điều chỉnh để trả về report nếu có, hoặc một thông báo từ db_scan_details
+            report_path = db_scan_details.get('report_json_path') or db_scan_details.get('report_md_path')
+            if report_path and os.path.exists(report_path):
                 try:
-                    with open(report_json, 'r', encoding='utf-8') as f:
-                        report_content = json.load(f)
-                        formatted_result = report_content
+                    with open(report_path, 'r', encoding='utf-8') as f:
+                        # Nếu là JSON, parse và trả về, nếu MD, trả về text
+                        if report_path.endswith(".json"):
+                            return jsonify(json.load(f))
+                        else:
+                            return Response(f.read(), mimetype='text/markdown')
                 except Exception as e:
-                    logger.error(f"Error reading JSON report {report_json}: {str(e)}")
-            
-            if not formatted_result and report_md and os.path.exists(report_md):
-                try:
-                    with open(report_md, 'r', encoding='utf-8') as f:
-                        report_content = f.read()
-                        formatted_result = {
-                            "markdown_content": report_content,
-                            "type": "markdown"
-                        }
-                except Exception as e:
-                    logger.error(f"Error reading MD report {report_md}: {str(e)}")
-            
-            # Nếu không đọc được file báo cáo, dùng kết quả từ scan.result
-            if not formatted_result:
-                if isinstance(scan.result, dict):
-                    formatted_result = scan.result
-                else:
-                    formatted_result = {
-                        "text_result": str(scan.result),
-                        "type": "text"
-                    }
-                
-            return jsonify({
-                "status": "completed", 
-                "result": formatted_result,
-                "report_json_path": report_json,
-                "report_md_path": report_md
-            })
-        
-        return jsonify({"status": scan.status})
-    
-    return jsonify({"error": "Scan not found"}), 404
+                    return jsonify({"error": f"Error reading report file: {str(e)}"}), 500
+            return jsonify({"status": db_scan_details.get('status', 'Completed (from DB)'), "target_url": db_scan_details.get('target_url'), "message": "Scan details retrieved from database."})
+        return jsonify({"error": "Scan not found in active list or database with this ID"}), 404
 
-# API để stream real-time output
-@app.route('/api/stream')
-def stream():
-    """Stream scan outputs as Server-Sent Events"""
-    def event_stream():
-        while True:
-            try:
-                # Get message with a timeout to avoid blocking forever
-                message = output_queue.get(timeout=1)
-                yield f"data: {json.dumps(message)}\n\n"
-            except queue.Empty:
-                # Send a keep-alive comment
-                yield ": keep-alive\n\n"
-            except Exception as e:
-                logger.error(f"Error in event stream: {str(e)}")
-                yield f"data: {json.dumps({'error': str(e)})}\n\n"
-    
-    return Response(stream_with_context(event_stream()),
-                  mimetype="text/event-stream")
+    if scan.status not in ["completed", "failed"]:
+        return jsonify({"status": scan.status, "message": "Scan is still running."})
 
-# Trang lịch sử quét
+    # Nếu scan đã hoàn thành hoặc thất bại từ current_scans
+    if scan.report_file and scan.report_file.get("json") and os.path.exists(scan.report_file["json"]):
+        try:
+            with open(scan.report_file["json"], 'r', encoding='utf-8') as f:
+                return jsonify(json.load(f))
+        except Exception as e:
+            logger.error(f"Error reading JSON report {scan.report_file['json']} for scan {scan_id}: {e}")
+            return jsonify({"status": scan.status, "result_message": scan.result, "error": "Could not load JSON report."})
+    elif scan.report_file and scan.report_file.get("markdown") and os.path.exists(scan.report_file["markdown"]):
+        try:
+            with open(scan.report_file["markdown"], 'r', encoding='utf-8') as f:
+                # Trả về Markdown dưới dạng text/plain hoặc text/markdown
+                return Response(f.read(), mimetype='text/markdown')
+        except Exception as e:
+            logger.error(f"Error reading Markdown report {scan.report_file['markdown']} for scan {scan_id}: {e}")
+            return jsonify({"status": scan.status, "result_message": scan.result, "error": "Could not load Markdown report."})
+    
+    return jsonify({"status": scan.status, "result_message": scan.result, "message": "Scan finished, but no report file found or accessible."})
+
+
 @app.route('/history')
 def history_page():
-    return render_template('history.html')
+    return render_template('history.html', title="Scan History")
 
-# API lấy lịch sử quét
 @app.route('/api/history')
-def get_scan_history():
-    """Lấy lịch sử quét từ database"""
-    try:
-        # Chỉ lấy từ database SQLite
-        history = get_scan_history_from_db()
-        return jsonify(history)
-    except Exception as e:
-        logger.error(f"Error getting scan history: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+def get_scan_history_api(): # Đổi tên API route để tránh trùng với hàm helper
+    history = get_scan_history_from_db()
+    return jsonify(history)
 
-# API liệt kê báo cáo
+# ... (giữ nguyên /api/reports, /api/report/<filename>, /api/history/<int:scan_id> DELETE, /api/report/<path:filename> DELETE, /report/<path:filename>)
+# ... (Nếu /api/reports và các hàm liên quan đến file report cần điều chỉnh encoding, hãy xem xét dùng safe_open_file từ main.py)
+
 @app.route('/api/reports')
 def list_reports():
-    """List all available scan reports from database and scan_reports directory"""
-    reports = []
+    reports_dir = "scan_reports"
+    if not os.path.exists(reports_dir):
+        return jsonify([])
     
-    # Lấy báo cáo từ database
-    db_history = get_scan_history_from_db()
-    for item in db_history:
-        if item['report_json_path'] or item['report_md_path']:
-            json_path = item['report_json_path']
-            md_path = item['report_md_path']
-            
-            # Kiểm tra tệp có tồn tại không
-            json_exists = json_path and os.path.exists(json_path)
-            md_exists = md_path and os.path.exists(md_path)
-            
-            if json_exists or md_exists:
-                # Lấy thời gian tạo từ timestamp hoặc thời gian sửa đổi tệp
-                if isinstance(item['scan_timestamp'], str):
-                    created = item['scan_timestamp']
-                else:
-                    try:
-                        created = datetime.fromtimestamp(item['scan_timestamp']).strftime('%Y-%m-%d %H:%M:%S')
-                    except:
-                        # Nếu timestamp không hợp lệ, lấy thời gian sửa đổi tệp
-                        json_time = os.path.getmtime(json_path) if json_exists else 0
-                        md_time = os.path.getmtime(md_path) if md_exists else 0
-                        timestamp = max(json_time, md_time)
-                        created = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
-                
-                reports.append({
-                    "db_id": item['id'],
-                    "target_url": item['target_url'],
-                    "scan_type": item['scan_type'],
-                    "created": created,
-                    "json_path": json_path if json_exists else None,
-                    "md_path": md_path if md_exists else None
+    report_files = []
+    for filename in os.listdir(reports_dir):
+        if filename.startswith("report_") and (filename.endswith(".json") or filename.endswith(".md")):
+            file_path = os.path.join(reports_dir, filename)
+            try:
+                stat = os.stat(file_path)
+                # Trích xuất thông tin từ tên file nếu có thể (ví dụ: target, timestamp)
+                # report_example_pentest_corp_20231026_103045_vulnerability.json
+                parts = filename.replace("report_", "").replace("_vulnerability.json", "").replace("_vulnerability.md", "").split("_")
+                target_guess = "N/A"
+                timestamp_str = "N/A"
+                if len(parts) > 1: # Giả sử ít nhất có target và timestamp
+                    timestamp_str = parts[-2] + "_" + parts[-1] if len(parts) >=2 else parts[-1]
+                    target_guess = "_".join(parts[:-2]) if len(parts) > 2 else parts[0]
+
+                report_files.append({
+                    "filename": filename,
+                    "path": file_path,
+                    "size": stat.st_size,
+                    "modified_time": datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S'),
+                    "type": "JSON" if filename.endswith(".json") else "Markdown",
+                    "target_guess": target_guess,
+                    "timestamp_str": timestamp_str
+                })
+            except Exception as e:
+                logger.error(f"Error processing report file {filename}: {e}")
+                report_files.append({
+                    "filename": filename,
+                    "error": str(e)
                 })
     
-    # Kiểm tra thư mục scan_reports để tìm báo cáo bổ sung
-    if os.path.exists('scan_reports'):
-        for filename in os.listdir('scan_reports'):
-            filepath = os.path.join('scan_reports', filename)
-            
-            # Kiểm tra xem báo cáo đã được thêm vào danh sách chưa
-            already_added = False
-            for report in reports:
-                if ((report.get('json_path') == filepath) or 
-                    (report.get('md_path') == filepath)):
-                    already_added = True
-                    break
-            
-            if not already_added and (filename.endswith('.json') or filename.endswith('.md')):
-                # Trích xuất thông tin từ tên tệp
-                parts = filename.split('_')
-                if len(parts) >= 2:
-                    # Định dạng mới: report_domain_timestamp_vulnerability.json
-                    target_url = parts[1]
-                    
-                    # Lấy thời gian tạo từ tệp
-                    timestamp = os.path.getmtime(filepath)
-                    created = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
-                    
-                    # Thêm vào danh sách báo cáo
-                    if filename.endswith('.json'):
-                        md_file = filepath.replace('.json', '.md')
-                        has_md = os.path.exists(md_file)
-                        reports.append({
-                            "target_url": target_url,
-                            "created": created,
-                            "json_path": filepath,
-                            "md_path": md_file if has_md else None
-                        })
-                    elif filename.endswith('.md'):
-                        json_file = filepath.replace('.md', '.json')
-                        # Chỉ thêm file .md nếu không có file .json tương ứng
-                        if not os.path.exists(json_file):
-                            reports.append({
-                                "target_url": target_url,
-                                "created": created,
-                                "json_path": None,
-                                "md_path": filepath
-                            })
-    
-    # Sort by newest first
-    reports.sort(key=lambda x: x["created"], reverse=True)
-    return jsonify({"reports": reports})
+    # Sắp xếp theo thời gian sửa đổi, mới nhất lên đầu
+    report_files.sort(key=lambda x: x.get("modified_time", ""), reverse=True)
+    return jsonify(report_files)
 
-# API đọc nội dung báo cáo
 @app.route('/api/report/<path:filename>')
 def get_report(filename):
-    """Get a specific report"""
-    try:
-        if os.path.exists(filename):
-            with open(filename, 'r', encoding='utf-8') as f:
-                content = f.read()
-                
-            # If it's a JSON file, format it
-            if filename.endswith('.json'):
-                try:
-                    data = json.loads(content)
-                    return jsonify({"content": data})
-                except json.JSONDecodeError as e:
-                    logger.error(f"Error decoding JSON: {str(e)}")
-                    return jsonify({"content": content, "type": "text", "error": "Invalid JSON format"})
-            elif filename.endswith('.md'):
-                # Markdown file
-                return jsonify({"content": content, "type": "markdown"})
-            else:
-                # Đây là file text
-                return jsonify({"content": {"text_result": content, "type": "text"}})
-        else:
-            return jsonify({"error": "Report not found"}), 404
-    except Exception as e:
-        return jsonify({"error": f"Error reading report: {str(e)}"}), 500
+    # filename ở đây bao gồm cả thư mục con nếu có, nhưng hiện tại là không
+    # Chúng ta cần đảm bảo filename an toàn, không cho phép path traversal
+    reports_dir = os.path.abspath("scan_reports")
+    requested_path = os.path.abspath(os.path.join(reports_dir, filename))
 
-# API xóa lịch sử quét
+    if not requested_path.startswith(reports_dir):
+        return jsonify({"error": "Access denied"}), 403 # Path traversal attempt
+
+    if not os.path.exists(requested_path) or not os.path.isfile(requested_path):
+        return jsonify({"error": "Report not found"}), 404
+
+    try:
+        # Sử dụng safe_open_file nếu cần xử lý encoding phức tạp
+        with open(requested_path, 'r', encoding='utf-8') as f: # Mặc định utf-8 cho report
+            content = f.read()
+        
+        if filename.endswith(".json"):
+            return jsonify(json.loads(content)) # Parse lại JSON để đảm bảo nó valid
+        elif filename.endswith(".md"):
+            return Response(content, mimetype='text/markdown') # Hoặc text/plain
+        else:
+            return Response(content, mimetype='text/plain')
+            
+    except json.JSONDecodeError as e:
+        logger.error(f"JSONDecodeError for report {filename}: {e}")
+        return jsonify({"error": "Report is not valid JSON", "details": str(e)}), 500
+    except Exception as e:
+        logger.error(f"Error reading report {filename}: {e}")
+        return jsonify({"error": "Could not read report file", "details": str(e)}), 500
+
+
 @app.route('/api/history/<int:scan_id>', methods=['DELETE'])
 def delete_scan_history(scan_id):
-    """Delete a specific scan record from the database and its associated report files"""
     try:
-        # First get the scan details to find report files
+        # Trước khi xóa khỏi DB, lấy thông tin report file để xóa
+        scan_details = get_scan_details_from_db(scan_id)
+        
         conn = sqlite3.connect(DB_NAME)
-        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        cursor.execute("""
-            SELECT report_json_path, report_md_path
-            FROM scans
-            WHERE id = ?
-        """, (scan_id,))
-        scan = cursor.fetchone()
-        
-        if not scan:
-            return jsonify({"success": False, "error": "Scan record not found"}), 404
-        
-        # Get report paths
-        report_json_path = scan['report_json_path']
-        report_md_path = scan['report_md_path']
-        
-        # Delete the scan record from database
         cursor.execute("DELETE FROM scans WHERE id = ?", (scan_id,))
         conn.commit()
-        conn.close()
         
-        # Delete associated report files if they exist
-        files_deleted = []
-        
-        if report_json_path and os.path.exists(report_json_path):
-            os.remove(report_json_path)
-            files_deleted.append(report_json_path)
-            
-            # Also try to delete any associated .txt file
-            txt_filename = report_json_path.replace('.json', '.txt')
-            if os.path.exists(txt_filename):
-                os.remove(txt_filename)
-                files_deleted.append(txt_filename)
-        
-        if report_md_path and os.path.exists(report_md_path):
-            os.remove(report_md_path)
-            files_deleted.append(report_md_path)
-        
-        logger.info(f"Deleted scan record ID {scan_id} and {len(files_deleted)} associated files")
-        
-        return jsonify({
-            "success": True, 
-            "message": f"Scan record and {len(files_deleted)} associated files deleted successfully",
-            "files_deleted": files_deleted
-        })
+        if cursor.rowcount > 0:
+            logger.info(f"Scan history with ID {scan_id} deleted from database.")
+            # Xóa các file report liên quan
+            if scan_details:
+                json_report = scan_details.get('report_json_path')
+                md_report = scan_details.get('report_md_path')
+                if json_report and os.path.exists(json_report):
+                    try:
+                        os.remove(json_report)
+                        logger.info(f"Deleted JSON report file: {json_report}")
+                    except Exception as e:
+                        logger.error(f"Error deleting JSON report file {json_report}: {e}")
+                if md_report and os.path.exists(md_report):
+                    try:
+                        os.remove(md_report)
+                        logger.info(f"Deleted Markdown report file: {md_report}")
+                    except Exception as e:
+                        logger.error(f"Error deleting Markdown report file {md_report}: {e}")
+            conn.close()
+            return jsonify({"message": f"Scan history ID {scan_id} and associated reports deleted."}), 200
+        else:
+            conn.close()
+            return jsonify({"error": f"Scan history with ID {scan_id} not found."}), 404
     except Exception as e:
-        logger.error(f"Error deleting scan record: {str(e)}", exc_info=True)
-        return jsonify({"success": False, "error": f"Error deleting scan record: {str(e)}"}), 500
+        logger.error(f"Error deleting scan history ID {scan_id}: {e}")
+        return jsonify({"error": "Failed to delete scan history", "details": str(e)}), 500
 
-# API xóa báo cáo
+
 @app.route('/api/report/<path:filename>', methods=['DELETE'])
 def delete_report(filename):
-    """Delete a specific report"""
-    try:
-        if os.path.exists(filename):
-            # Delete the JSON file
-            os.remove(filename)
-            
-            # Also remove corresponding text file if it exists
-            txt_filename = filename.replace('.json', '.txt')
-            if os.path.exists(txt_filename):
-                os.remove(txt_filename)
-                
-            # Check if this report is associated with any scan in the database
-            conn = sqlite3.connect(DB_NAME)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id FROM scans 
-                WHERE report_json_path = ? OR report_md_path = ?
-            """, (filename, filename))
-            scan = cursor.fetchone()
-            
-            if scan:
-                # Update the database record to remove the reference to this file
-                if filename.endswith('.json'):
-                    cursor.execute("UPDATE scans SET report_json_path = NULL WHERE id = ?", (scan['id'],))
-                elif filename.endswith('.md'):
-                    cursor.execute("UPDATE scans SET report_md_path = NULL WHERE id = ?", (scan['id'],))
-                conn.commit()
-            
-            conn.close()
-            
-            return jsonify({"success": True, "message": "Report deleted successfully"})
-        else:
-            return jsonify({"success": False, "error": "Report not found"}), 404
-    except Exception as e:
-        logger.error(f"Error deleting report: {str(e)}", exc_info=True)
-        return jsonify({"success": False, "error": f"Error deleting report: {str(e)}"}), 500
+    reports_dir = os.path.abspath("scan_reports")
+    requested_path = os.path.abspath(os.path.join(reports_dir, filename))
 
-# Trang chi tiết báo cáo
+    if not requested_path.startswith(reports_dir):
+        return jsonify({"error": "Access denied"}), 403
+
+    if not os.path.exists(requested_path) or not os.path.isfile(requested_path):
+        return jsonify({"error": "Report not found"}), 404
+    
+    try:
+        os.remove(requested_path)
+        logger.info(f"Report file {filename} deleted successfully.")
+        
+        # Thử cập nhật DB nếu có bản ghi nào trỏ đến file này (phần này phức tạp hơn)
+        # Tìm trong DB các bản ghi có report_json_path hoặc report_md_path là filename và cập nhật thành NULL
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        cursor.execute("UPDATE scans SET report_json_path = NULL WHERE report_json_path = ?", (requested_path,))
+        cursor.execute("UPDATE scans SET report_md_path = NULL WHERE report_md_path = ?", (requested_path,))
+        conn.commit()
+        conn.close()
+        logger.info(f"Database updated for deleted report: {filename}")
+        
+        return jsonify({"message": f"Report {filename} deleted."}), 200
+    except Exception as e:
+        logger.error(f"Error deleting report file {filename}: {e}")
+        return jsonify({"error": "Failed to delete report file", "details": str(e)}), 500
+
+
 @app.route('/report/<path:filename>')
 def view_report(filename):
-    return render_template('report.html', filename=filename)
+    # Đây là trang HTML để hiển thị report, không phải API trả về JSON/Markdown thô
+    # Nó sẽ gọi /api/report/<filename> để lấy nội dung
+    # Cần kiểm tra loại file để render template phù hợp
+    file_type = "json" if filename.endswith(".json") else "markdown" if filename.endswith(".md") else "unknown"
+    return render_template('view_report.html', 
+                           title=f"View Report: {filename}", 
+                           report_filename=filename,
+                           report_api_url=url_for('get_report', filename=filename),
+                           file_type=file_type)
 
-# Trang cấu hình
+
+def check_db_status_internal():
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM scans LIMIT 1")
+        conn.close()
+        return {"status_message": "Hoạt động", "ok": True, "details": "Kết nối cơ sở dữ liệu thành công."}
+    except Exception as e:
+        logger.error(f"Database connection check failed: {e}")
+        return {"status_message": "Lỗi kết nối", "ok": False, "details": str(e)}
+
 @app.route('/settings')
 def settings_page():
-    return render_template('settings.html')
+    current_configs = {
+        "deepseek_api_key": APP_SETTINGS.get("DEEPSEEK_API_KEY", PLACEHOLDER_DEEPSEEK_API_KEY),
+        "deepseek_api_base": APP_SETTINGS.get("DEEPSEEK_API_BASE", PLACEHOLDER_DEEPSEEK_API_BASE),
+        "openai_api_key": APP_SETTINGS.get("OPENAI_API_KEY", PLACEHOLDER_OPENAI_API_KEY),
+        "openai_api_base": APP_SETTINGS.get("OPENAI_API_BASE", PLACEHOLDER_OPENAI_API_BASE),
+    }
+    
+    system_health_info = {}
+    settings_file_exists = os.path.exists(SETTINGS_FILE_PATH)
+    system_health_info["settings_file"] = {
+        "label": f"Tệp cấu hình ({SETTINGS_FILE_PATH})",
+        "status_message": "Tìm thấy" if settings_file_exists else "Không tìm thấy (sẽ được tạo nếu lưu cài đặt)",
+        "ok": settings_file_exists,
+        "details": SETTINGS_FILE_PATH
+    }
+    db_info = check_db_status_internal()
+    system_health_info["database"] = {
+        "label": "Cơ sở dữ liệu (SQLite)",
+        "status_message": db_info["status_message"],
+        "ok": db_info["ok"],
+        "details": db_info.get("details", "")
+    }
+            
+    return render_template('settings.html', 
+                           title="Settings & Status", 
+                           current_llm_configs=current_configs,
+                           system_health_status_dict=system_health_info,
+                           settings_file_path_on_server_for_display=SETTINGS_FILE_PATH,
+                           PLACEHOLDER_DEEPSEEK_API_KEY=PLACEHOLDER_DEEPSEEK_API_KEY,
+                           PLACEHOLDER_DEEPSEEK_API_BASE=PLACEHOLDER_DEEPSEEK_API_BASE,
+                           PLACEHOLDER_OPENAI_API_KEY=PLACEHOLDER_OPENAI_API_KEY,
+                           PLACEHOLDER_OPENAI_API_BASE=PLACEHOLDER_OPENAI_API_BASE
+                           )
 
-# Xử lý 404
+@app.route('/api/settings/llm', methods=['POST'])
+def save_llm_settings():
+    global APP_SETTINGS 
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Invalid JSON payload"}), 400
+
+        new_ds_key = data.get('deepseek_api_key', '').strip()
+        new_ds_base = data.get('deepseek_api_base', '').strip()
+        new_openai_key = data.get('openai_api_key', '').strip()
+        new_openai_base = data.get('openai_api_base', '').strip()
+
+        try:
+            with open(SETTINGS_FILE_PATH, 'r', encoding='utf-8') as f:
+                current_file_settings = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            current_file_settings = {}
+        
+        current_file_settings["DEEPSEEK_API_KEY"] = new_ds_key if new_ds_key else PLACEHOLDER_DEEPSEEK_API_KEY
+        current_file_settings["DEEPSEEK_API_BASE"] = new_ds_base if new_ds_base else PLACEHOLDER_DEEPSEEK_API_BASE
+        current_file_settings["OPENAI_API_KEY"] = new_openai_key if new_openai_key else PLACEHOLDER_OPENAI_API_KEY
+        current_file_settings["OPENAI_API_BASE"] = new_openai_base if new_openai_base else PLACEHOLDER_OPENAI_API_BASE
+
+        with open(SETTINGS_FILE_PATH, 'w', encoding='utf-8') as f:
+            json.dump(current_file_settings, f, indent=4, ensure_ascii=False)
+        
+        logger.info(f"LLM settings saved to {SETTINGS_FILE_PATH}")
+
+        reloaded_settings = main_load_app_settings()
+        if isinstance(APP_SETTINGS, dict) and isinstance(reloaded_settings, dict):
+            APP_SETTINGS.clear()
+            APP_SETTINGS.update(reloaded_settings)
+            if 'main' in sys.modules:
+                main_module_app_settings = getattr(sys.modules['main'], 'APP_SETTINGS', None)
+                if main_module_app_settings is not None and main_module_app_settings is not APP_SETTINGS:
+                    main_module_app_settings.clear()
+                    main_module_app_settings.update(reloaded_settings)
+                    logger.info("main.APP_SETTINGS (module global) also reloaded.")
+            logger.info("In-memory APP_SETTINGS (used by web_app) has been updated.")
+        else:
+            logger.warning("Could not reliably update in-memory APP_SETTINGS. A restart might be needed.")
+
+        return jsonify({"message": "LLM settings saved successfully. Applied to current session."}), 200
+
+    except Exception as e:
+        logger.error(f"Error saving LLM settings: {e}", exc_info=True)
+        return jsonify({"error": f"Failed to save LLM settings: {str(e)}"}), 500
+
 @app.errorhandler(404)
 def page_not_found(e):
-    return render_template('404.html'), 404
+    return render_template('404.html', title="Page Not Found"), 404
 
-def load_scan_history():
-    """Không sử dụng file scan_history.json nữa, biến này chỉ có mặt để tránh lỗi khi tham chiếu đến nó"""
-    global scan_history
-    scan_history = []  # Luôn để mảng rỗng vì không còn dùng file scan_history.json
-
-# API để lấy kết quả quét từ ID trong database
-@app.route('/api/db/scan/<int:db_id>')
-def get_scan_by_db_id(db_id):
-    """Get scan details by database ID"""
-    try:
-        scan_details = get_scan_details_from_db(db_id)
-        
-        if scan_details:
-            # Format response
-            json_path = scan_details.get('report_json_path')
-            md_path = scan_details.get('report_md_path')
-            
-            # Kiểm tra tệp có tồn tại không
-            json_exists = json_path and os.path.exists(json_path)
-            md_exists = md_path and os.path.exists(md_path)
-            
-            # Chuyển đổi timestamp thành định dạng dễ đọc
-            timestamp_display = scan_details.get('scan_timestamp', '')
-            timestamp_unix = 0
-            
-            if timestamp_display:
-                if isinstance(timestamp_display, str):
-                    try:
-                        # Chuyển từ string sang datetime rồi thành unix timestamp
-                        dt = datetime.strptime(timestamp_display, "%Y-%m-%d %H:%M:%S")
-                        timestamp_unix = int(dt.timestamp())
-                    except (ValueError, TypeError) as e:
-                        # Try alternative formats if the standard format fails
-                        try:
-                            # Try ISO format
-                            dt = datetime.fromisoformat(timestamp_display.replace('Z', '+00:00'))
-                            timestamp_unix = int(dt.timestamp())
-                        except:
-                            # If all parsing fails, use current time
-                            logger.error(f"Error parsing timestamp string '{timestamp_display}': {e}")
-                            timestamp_unix = int(time.time())
-                else:
-                    # Nếu là số, giả định đó là unix timestamp
-                    timestamp_unix = int(timestamp_display)
-            
-            response = {
-                "id": scan_details['id'],
-                "target_url": scan_details.get('target_url', 'Unknown'),
-                "scan_type": scan_details.get('scan_type', 'basic'),
-                "status": scan_details.get('status', 'Unknown'),
-                "timestamp": timestamp_unix,
-                "timestamp_display": timestamp_display,
-                "report_json_path": json_path if json_exists else None,
-                "report_md_path": md_path if md_exists else None,
-                "duration": scan_details.get('duration', "N/A")  # Lấy thời gian quét từ chi tiết scan
-            }
-            
-            return jsonify(response)
-        
-        # Không tìm thấy trong cơ sở dữ liệu
-        return jsonify({"error": "Scan not found"}), 404
-    except Exception as e:
-        logger.error(f"Error in get_scan_by_db_id: {str(e)}", exc_info=True)
-        return jsonify({"error": f"Error getting scan details: {str(e)}"}), 500
+# @app.route('/api/db/scan/<int:db_id>') # Route này có vẻ không cần thiết nữa nếu dashboard dùng scan_history
+# def get_scan_by_db_id(db_id):
+#     scan = get_scan_details_from_db(db_id)
+#     if scan:
+#         return jsonify(scan)
+#     return jsonify({"error": "Scan not found"}), 404
 
 if __name__ == '__main__':
-    # Đảm bảo database đã được khởi tạo
-    init_db()
+    # Khởi tạo DB nếu chưa có khi web app chạy trực tiếp
+    # init_db() # init_db đã được gọi trong main.py, và main.py được import
+    # Nếu main.py không được import thành công, init_db() ở đây có thể cần thiết
+    # Tuy nhiên, APP_SETTINGS và các hằng số khác cũng sẽ thiếu.
+    # Tốt nhất là đảm bảo main.py được import đúng cách.
     
-    # Ensure required directories exist
-    os.makedirs('web/static', exist_ok=True)
-    os.makedirs('web/templates', exist_ok=True)
-    os.makedirs('web/static/css', exist_ok=True)
-    os.makedirs('web/static/js', exist_ok=True)
-    os.makedirs('web/static/img', exist_ok=True)
-    os.makedirs('scan_reports', exist_ok=True)
-    
-    # Load scan history
-    load_scan_history()
-    
-    # Run the app
-    app.run(debug=True, host='0.0.0.0', port=5000) 
+    # Kiểm tra xem init_db có nên được gọi từ đây không, hay chỉ dựa vào main.py
+    # Nếu chạy vuln_web_app.py độc lập, init_db() trong main.py không được chạy trừ khi import.
+    # Nếu main.py được import, init_db() đã chạy.
+    # Để an toàn, nếu DB_NAME không phải là placeholder lỗi:
+    if "Lỗi import" not in DB_NAME and not os.path.exists(DB_NAME):
+        logger.info(f"Database {DB_NAME} not found. Attempting to initialize from web_app.")
+        try:
+            # Cần đảm bảo init_db từ main.py có thể được gọi hoặc định nghĩa lại ở đây
+            # Vì init_db trong main.py có logger riêng, nó sẽ thông báo.
+            from main import init_db as main_init_db # Thử import lại chỉ init_db
+            main_init_db()
+        except ImportError:
+             logger.error("Could not import init_db from main.py to initialize database from web_app.")
+        except Exception as e_init:
+            logger.error(f"Error initializing DB from web_app: {e_init}")
+
+
+    app.run(debug=True, host='0.0.0.0', port=5000) #
