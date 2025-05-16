@@ -745,49 +745,79 @@
     
     // Function to delete scan
     function deleteScan(scanId) {
+        const deleteButton = event.target.closest('button'); // Lấy nút đã được nhấp
+        const originalButtonContent = deleteButton ? deleteButton.innerHTML : '';
+
         if (!confirm('Are you sure you want to delete this scan? This will remove the scan record and all associated report files.')) {
             return;
         }
-        
+
+        if (deleteButton) {
+            deleteButton.disabled = true;
+            deleteButton.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Deleting...`;
+        }
+
         fetch(`/api/history/${scanId}`, {
-            method: 'DELETE'
+            method: 'DELETE',
         })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                // Show success message with toast
-                const toast = document.createElement('div');
-                toast.className = 'position-fixed bottom-0 end-0 p-3';
-                toast.style.zIndex = 9999;
-                toast.innerHTML = `
-                    <div class="toast show bg-success text-white" role="alert" aria-live="assertive" aria-atomic="true">
-                        <div class="toast-header bg-success text-white">
-                            <strong class="me-auto"><i class="bi bi-check-circle me-2"></i> Success</strong>
-                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast"></button>
-                        </div>
-                        <div class="toast-body">
-                            Scan record deleted successfully.
-                        </div>
-                    </div>
-                `;
-                document.body.appendChild(toast);
-                
-                // Auto-hide toast after 3 seconds
-                setTimeout(() => {
-                    toast.remove();
-                }, 3000);
-                
-                // Reload history to update the table
-                loadHistory();
-            } else {
-                // Show error message
-                alert(`Error: ${data.error || 'Failed to delete scan'}`);
+        .then(response => {
+            if (response.ok) {
+                return response.json(); 
             }
+            // Nếu không ok, cố gắng lấy JSON lỗi, và ném lỗi với status code
+            return response.json().then(errData => {
+                const error = new Error(errData.error || `Failed to delete scan. Server responded with ${response.status}`);
+                error.status = response.status; // Gắn status vào đối tượng lỗi
+                throw error;
+            }).catch(() => { // Fallback nếu response.json() cũng lỗi
+                const error = new Error(`Failed to delete scan. Server responded with ${response.status}`);
+                error.status = response.status;
+                throw error;
+            });
+        })
+        .then(data => {
+            console.log(data.message);
+            showToast(`Scan ID ${scanId} deleted successfully. Refreshing list...`, 'success');
+            loadHistory(); // Tải lại toàn bộ lịch sử, nút cũ sẽ biến mất
+            // Không cần kích hoạt lại nút ở đây vì loadHistory() sẽ vẽ lại mọi thứ
         })
         .catch(error => {
             console.error('Error deleting scan:', error);
-            alert(`Error: ${error.message || 'Failed to delete scan'}`);
+            let errorMessage = error.message;
+            if (error.status === 404) {
+                errorMessage = `Scan ID ${scanId} not found or already deleted. Refreshing list.`;
+                // Có thể cũng nên gọi loadHistory() ở đây để cập nhật UI nếu mục thực sự đã bị xóa
+                loadHistory();
+            }
+            showToast(`Error: ${errorMessage}`, 'danger');
+            
+            if (deleteButton && error.status !== 404) { // Chỉ kích hoạt lại nếu không phải 404 và nút tồn tại
+                deleteButton.disabled = false;
+                deleteButton.innerHTML = originalButtonContent;
+            }
         });
+    }
+
+    // Function to show a toast message (Bootstrap 5)
+    function showToast(message, type) {
+        const toast = document.createElement('div');
+        toast.className = `toast position-fixed bottom-0 end-0 p-3 ${type === 'success' ? 'bg-success text-white' : 'bg-danger text-white'}`;
+        toast.style.zIndex = 9999;
+        toast.innerHTML = `
+            <div class="toast-header ${type === 'success' ? 'bg-success text-white' : 'bg-danger text-white'}">
+                <strong class="me-auto"><i class="bi bi-${type === 'success' ? 'check-circle' : 'exclamation-triangle'} me-2"></i> ${type.charAt(0).toUpperCase() + type.slice(1)}</strong>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast"></button>
+            </div>
+            <div class="toast-body">
+                ${message}
+            </div>
+        `;
+        document.body.appendChild(toast);
+        
+        // Auto-hide toast after 3 seconds
+        setTimeout(() => {
+            toast.remove();
+        }, 3000);
     }
 </script>
 {% endblock %} 
