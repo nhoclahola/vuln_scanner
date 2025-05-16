@@ -42,27 +42,27 @@
         </div>
     </div>
     
-    <!-- Charts Row -->
+    <!-- Charts Row 1 (Vulnerability Distribution and Scan Activity) -->
     <div class="row mb-4">
-        <div class="col-md-6">
-            <div class="card">
+        <div class="col-md-6 mb-4 mb-md-0">
+            <div class="card h-100">
                 <div class="card-header">
                     <h5 class="mb-0">Vulnerability Distribution</h5>
                 </div>
                 <div class="card-body">
-                    <div class="chart-container">
+                    <div class="chart-container" style="height: 300px;">
                         <canvas id="vulnDistributionChart"></canvas>
                     </div>
                 </div>
             </div>
         </div>
         <div class="col-md-6">
-            <div class="card">
+            <div class="card h-100">
                 <div class="card-header">
                     <h5 class="mb-0">Scan Activity</h5>
                 </div>
                 <div class="card-body">
-                    <div class="chart-container">
+                    <div class="chart-container" style="height: 300px;">
                         <canvas id="scanActivityChart"></canvas>
                     </div>
                 </div>
@@ -70,39 +70,33 @@
         </div>
     </div>
 
-    <!-- Recent Scans Table -->
-    <div class="card mb-4">
-        <div class="card-header d-flex justify-content-between align-items-center">
-            <h5 class="mb-0">Recent Scans</h5>
-            <a href="{{ url_for('history_page') }}" class="btn btn-sm btn-outline-primary">View All</a>
-        </div>
-        <div class="card-body">
-            <!-- Loading indicator -->
-            <div id="recentScansLoader" class="text-center py-5">
-                <div class="spinner-border text-primary" role="status">
-                    <span class="visually-hidden">Loading...</span>
+    <!-- Charts Row 2 (Top Vulnerability Types) -->
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Top Vulnerability Types</h5>
                 </div>
-                <p class="mt-3">Loading recent scans...</p>
+                <div class="card-body">
+                    <div class="chart-container" style="height: 350px;">
+                        <canvas id="topVulnerabilitiesChart"></canvas>
+                    </div>
+                </div>
             </div>
-            
-            <!-- No scans message -->
-            <div id="noScansMessage" class="alert alert-info" style="display: none;">
-                <i class="bi bi-info-circle me-2"></i>
-                No scan history found. <a href="{{ url_for('scan_page') }}" class="alert-link">Run your first scan</a> to get started.
-            </div>
-            
-            <!-- Error message -->
-            <div id="errorMessage" class="alert alert-danger" style="display: none;">
-                <i class="bi bi-exclamation-triangle me-2"></i>
-                <span id="errorText">Failed to load scan history.</span>
-                <button class="btn btn-outline-danger btn-sm ms-3" onclick="loadDashboardData()">
-                    <i class="bi bi-arrow-clockwise me-1"></i> Retry
-                </button>
-            </div>
-            
-            <!-- Recent scans table -->
-            <div id="recentScansTable" style="display: none;">
-                <!-- Table will be inserted here -->
+        </div>
+    </div>
+
+    <!-- Recent Scans Table -->
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Recent Scans</h5>
+                </div>
+                <div class="card-body" id="recentScansTable">
+                    <!-- Table will be inserted here by JavaScript -->
+                    <p class="text-center text-muted">Loading recent scans...</p>
+                </div>
             </div>
         </div>
     </div>
@@ -113,72 +107,49 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
     const vulnDistributionDataFromFlask = {{ vulnerability_distribution | tojson | safe }};
+    const topVulnerabilitiesDataFromFlask = {{ top_vulnerabilities | tojson | safe }};
     let vulnDistributionChartInstance = null;
     let scanActivityChartInstance = null;
+    let topVulnerabilitiesChartInstance = null;
+
+    function setupChartTheme() {
+        // Basic theme setup (can be expanded)
+        Chart.defaults.font.family = '"Inter", sans-serif';
+        Chart.defaults.plugins.legend.labels.boxWidth = 12;
+        Chart.defaults.plugins.legend.labels.padding = 15;
+    }
 
     document.addEventListener('DOMContentLoaded', function() {
         loadDashboardData();
         setupChartTheme();
+        
         if (vulnDistributionDataFromFlask && typeof vulnDistributionDataFromFlask === 'object') {
             createVulnDistributionChart(vulnDistributionDataFromFlask);
         } else {
             console.warn('Vulnerability distribution data from Flask is not available or not an object.');
             createVulnDistributionChart({ critical: 0, high: 0, medium: 0, low: 0, unknown: 0 });
         }
+
+        if (topVulnerabilitiesDataFromFlask && Array.isArray(topVulnerabilitiesDataFromFlask)) {
+            createTopVulnerabilitiesChart(topVulnerabilitiesDataFromFlask);
+        } else {
+            console.warn('Top vulnerabilities data from Flask is not available or not an array.');
+            createTopVulnerabilitiesChart([]);
+        }
     });
     
-    function setupChartTheme() {
-        const isDarkMode = document.documentElement.getAttribute('data-theme') === 'dark';
-        Chart.defaults.color = isDarkMode ? '#e0e0e0' : '#666666';
-        Chart.defaults.borderColor = isDarkMode ? '#2d2d3a' : '#eeeeee';
-    }
-    
     function loadDashboardData() {
-        const loader = document.getElementById('recentScansLoader');
-        const table = document.getElementById('recentScansTable');
-        const noScans = document.getElementById('noScansMessage');
-        const errorMsg = document.getElementById('errorMessage');
-        const errorText = document.getElementById('errorText');
-        
-        // Show loader, hide everything else
-        loader.style.display = 'block';
-        table.style.display = 'none';
-        noScans.style.display = 'none';
-        errorMsg.style.display = 'none';
-        
-        fetch('/api/history')
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`Server returned ${response.status} ${response.statusText}`);
-                }
-                return response.json();
-            })
+        const apiUrl = '{{ url_for("get_scan_history_api") }}';
+        fetch(apiUrl)
+            .then(response => response.json())
             .then(data => {
-                // Data received successfully
-                console.log('Dashboard data:', data);
-                
-                // Hide loader
-                loader.style.display = 'none';
-                
-                if (!data || data.length === 0) {
-                    // Show no scans message if empty
-                    noScans.style.display = 'block';
-                    return;
+                if(data && Array.isArray(data)){
+                    displayDashboardData(data);
+                } else {
+                    console.error("Failed to load or parse scan history data.");
                 }
-                
-                // Process and display the data
-                displayDashboardData(data);
-                
-                // Show table
-                table.style.display = 'block';
             })
-            .catch(error => {
-                // Handle error
-                console.error('Error loading dashboard data:', error);
-                loader.style.display = 'none';
-                errorMsg.style.display = 'block';
-                errorText.textContent = error.message || 'Failed to load scan history.';
-            });
+            .catch(error => console.error('Error fetching scan history:', error));
     }
     
     function displayDashboardData(historyData) {
@@ -187,9 +158,7 @@
         let latestScanTimestamp = 0;
         let scanDates = {};
         
-        // Process all scan data
         historyData.forEach(scan => {
-            // Scan time calculation
             if (scan.duration && scan.duration !== 'N/A') {
                 const duration = parseFloat(scan.duration);
                 if (!isNaN(duration)) {
@@ -197,20 +166,17 @@
                 }
             }
             
-            // Latest scan date
             const timestamp = scan.timestamp ? parseInt(scan.timestamp) : 0;
             if (timestamp > latestScanTimestamp) {
                 latestScanTimestamp = timestamp;
             }
             
-            // Group scans by date for activity chart
             if (timestamp) {
                 const scanDate = new Date(timestamp * 1000).toLocaleDateString();
                 scanDates[scanDate] = (scanDates[scanDate] || 0) + 1;
             }
         });
         
-        // Update statistics cards
         document.getElementById('total-scans').textContent = totalScans;
         
         let totalVulnerabilitiesFromServer = 0;
@@ -224,15 +190,13 @@
         }
         document.getElementById('total-vulns').textContent = totalVulnerabilitiesFromServer;
         
-        // Calculate average scan time
         if (totalScans > 0 && totalScanTime > 0) {
             const avgTime = totalScanTime / totalScans;
             document.getElementById('avg-time').textContent = formatDuration(avgTime);
         } else {
-            document.getElementById('avg-time').textContent = '0:00';
+            document.getElementById('avg-time').textContent = '0s';
         }
         
-        // Display last scan date
         if (latestScanTimestamp > 0) {
             const lastScanDate = new Date(latestScanTimestamp * 1000);
             document.getElementById('last-scan').textContent = lastScanDate.toLocaleDateString();
@@ -240,85 +204,55 @@
             document.getElementById('last-scan').textContent = 'Never';
         }
         
-        // Display recent scans table
-        const recentScansTable = document.getElementById('recentScansTable');
-        
-        // Get only the 5 most recent scans
+        const recentScansTableDiv = document.getElementById('recentScansTable');
         const recentScans = historyData.slice(0, 5);
         
-        const tableHTML = `
+        let tableHTML = `
             <div class="table-responsive">
                 <table class="table table-hover align-middle">
                     <thead>
                         <tr>
                             <th>Target URL</th>
-                            <th>Type</th>
-                            <th>Date</th>
+                            <th>Scan Type</th>
+                            <th>Date & Time</th>
                             <th>Status</th>
-                            <th class="text-center">Action</th>
+                            <th class="text-center">Actions</th>
                         </tr>
                     </thead>
-                    <tbody>
-                        ${recentScans.map(scan => {
-                            // Format date display
-                            let dateDisplay = formatDate(scan.timestamp, scan.date);
-                            
-                            // Format status display
-                            const status = scan.status || 'Unknown';
-                            const statusClass = getStatusClass(status);
-                            
-                            // Determine report path
-                            let reportPath = '';
-                            if (scan.report_json_path) {
-                                reportPath = scan.report_json_path;
-                            } else if (scan.report_md_path) {
-                                reportPath = scan.report_md_path;
-                            } else if (scan.report_file) {
-                                reportPath = extractReportPath(scan.report_file) || scan.report_file;
-                            }
-                            
-                            return `
-                                <tr>
-                                    <td>
-                                        <div class="text-truncate" style="max-width: 200px;" title="${scan.target_url || 'N/A'}">
-                                            <a href="${scan.target_url || '#'}" target="_blank" class="text-decoration-none">
-                                                <i class="bi bi-link-45deg"></i> ${scan.target_url || 'N/A'}
-                                            </a>
-                                        </div>
-                                    </td>
-                                    <td>
-                                        <span class="badge ${scan.scan_type === 'full' ? 'bg-success' : 'bg-primary'}">
-                                            ${scan.scan_type === 'full' ? 'Full' : 'Basic'}
-                                        </span>
-                                    </td>
-                                    <td>${dateDisplay}</td>
-                                    <td>
-                                        <span class="badge ${statusClass}">
-                                            ${status}
-                                        </span>
-                                    </td>
-                                    <td class="text-center">
-                                        ${reportPath ? 
-                                            `<a href="/report/${encodeURIComponent(reportPath)}" class="btn btn-sm btn-primary">
-                                                <i class="bi bi-file-text"></i> View
-                                            </a>` : 
-                                            `<button class="btn btn-sm btn-secondary" disabled>
-                                                <i class="bi bi-file-earmark-x"></i> N/A
-                                            </button>`
-                                        }
-                                    </td>
-                                </tr>
-                            `;
-                        }).join('')}
-                    </tbody>
-                </table>
-            </div>
-        `;
+                    <tbody>`;
+        if (recentScans.length > 0) {
+            recentScans.forEach(scan => {
+                const scanTimestamp = scan.timestamp ? new Date(scan.timestamp * 1000).toLocaleString() : (scan.scan_timestamp || 'N/A');
+                const scanTypeBadge = scan.scan_type === 'full' ? 'bg-success' : 'bg-primary';
+                const scanTypeText = scan.scan_type === 'full' ? 'Full' : 'Basic';
+                const statusBadgeClass = getStatusClass(scan.status);
+                const targetUrlDisplay = scan.target_url || 'N/A';
+                const truncatedTargetUrl = targetUrlDisplay.length > 30 ? targetUrlDisplay.substring(0, 27) + '...' : targetUrlDisplay;
+
+                tableHTML += `
+                    <tr>
+                        <td>
+                            <a href="${targetUrlDisplay === 'N/A' ? '#' : targetUrlDisplay}" target="_blank" 
+                               title="${targetUrlDisplay}" class="text-truncate d-inline-block" style="max-width: 250px;">
+                                ${truncatedTargetUrl}
+                            </a>
+                        </td>
+                        <td><span class="badge ${scanTypeBadge}">${scanTypeText}</span></td>
+                        <td>${scanTimestamp}</td>
+                        <td><span class="badge ${statusBadgeClass}">${scan.status || 'Unknown'}</span></td>
+                        <td class="text-center">
+                            <a href="{{ url_for('history_page') }}#scan-${scan.id}" class="btn btn-sm btn-outline-primary" title="View Details">
+                                <i class="bi bi-eye"></i>
+                            </a>
+                        </td>
+                    </tr>`;
+            });
+        } else {
+            tableHTML += '<tr><td colspan="5" class="text-center text-muted">No recent scans found.</td></tr>';
+        }
+        tableHTML += '</tbody></table></div>';
+        if(recentScansTableDiv) recentScansTableDiv.innerHTML = tableHTML;
         
-        recentScansTable.innerHTML = tableHTML;
-        recentScansTable.style.display = 'block';
-        
-        // Vẽ biểu đồ Scan Activity (logic này có thể đã có hoặc cần thêm)
         if (Object.keys(scanDates).length > 0) {
             createScanActivityChart(scanDates);
         }
@@ -361,11 +295,11 @@
         };
 
         if (vulnDistributionChartInstance) {
-            vulnDistributionChartInstance.destroy(); // Hủy biểu đồ cũ nếu có
+            vulnDistributionChartInstance.destroy();
         }
 
         vulnDistributionChartInstance = new Chart(ctx, {
-            type: 'doughnut', // Hoặc 'pie'
+            type: 'doughnut',
             data: chartData,
             options: {
                 responsive: true,
@@ -429,84 +363,83 @@
         });
     }
     
-    // Helper function to format date
-    function formatDate(timestamp, dateStr) {
-        if (!timestamp && !dateStr) {
-            return 'Unknown';
+    function createTopVulnerabilitiesChart(topVulnsData) {
+        const ctx = document.getElementById('topVulnerabilitiesChart')?.getContext('2d');
+        if (!ctx) {
+            console.error('Top Vulnerabilities Chart canvas context not found.');
+            return;
         }
-        
-        try {
-            if (timestamp) {
-                // Convert timestamp to date
-                const date = new Date(parseInt(timestamp) * 1000);
-                return date.toLocaleString();
-            } else if (dateStr) {
-                // Use provided date string
-                return dateStr;
+
+        const labels = topVulnsData.map(item => item.name);
+        const counts = topVulnsData.map(item => item.count);
+
+        const chartData = {
+            labels: labels,
+            datasets: [{
+                label: 'Frequency',
+                data: counts,
+                backgroundColor: 'rgba(54, 162, 235, 0.7)', // Blue
+                borderColor: 'rgba(54, 162, 235, 1)',
+                borderWidth: 1
+            }]
+        };
+
+        if (topVulnerabilitiesChartInstance) {
+            topVulnerabilitiesChartInstance.destroy();
+        }
+
+        topVulnerabilitiesChartInstance = new Chart(ctx, {
+            type: 'bar',
+            data: chartData,
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        beginAtZero: true,
+                        ticks: { 
+                            stepSize: Math.max(1, ...counts) > 10 ? Math.ceil(Math.max(1, ...counts)/10) : 1,
+                            precision: 0
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    title: {
+                        display: false,
+                        text: 'Top Vulnerability Types'
+                    }
+                }
             }
-        } catch (e) {
-            console.error('Error formatting date:', e);
-        }
-        
-        return 'Unknown';
+        });
     }
     
-    // Helper function to format duration
-    function formatDuration(duration) {
-        if (!duration || duration === 'N/A') {
-            return '-';
-        }
-        
-        try {
-            // Check if it's already in MM:SS format
-            if (typeof duration === 'string' && duration.includes(':')) {
-                return duration;
-            }
-            
-            // Convert to number
-            const seconds = parseFloat(duration);
-            if (isNaN(seconds)) {
-                return '-';
-            }
-            
-            // Format as MM:SS
-            const minutes = Math.floor(seconds / 60);
-            const remainingSeconds = Math.floor(seconds % 60);
-            return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
-        } catch (e) {
-            console.error('Error formatting duration:', e);
-        }
-        
-        return '-';
+    function formatDuration(seconds) {
+        if (seconds === null || seconds === undefined || isNaN(parseFloat(seconds))) return '--';
+        const totalSeconds = parseFloat(seconds);
+        if (totalSeconds < 0) return '0s';
+        const h = Math.floor(totalSeconds / 3600);
+        const m = Math.floor((totalSeconds % 3600) / 60);
+        const s = Math.floor(totalSeconds % 60);
+        if (h > 0) return `${h}h ${m}m`;
+        if (m > 0) return `${m}m ${s}s`;
+        return `${s}s`;
     }
     
-    // Helper function to get status class
     function getStatusClass(status) {
         if (!status) return 'bg-secondary';
         
         const statusLower = status.toLowerCase();
         
         if (statusLower.includes('complet')) return 'bg-success';
-        if (statusLower.includes('error')) return 'bg-danger';
+        if (statusLower.includes('error') || statusLower.includes('fail')) return 'bg-danger';
         if (statusLower.includes('run')) return 'bg-primary';
-        if (statusLower.includes('pend')) return 'bg-warning text-dark'; // Added text-dark for better contrast on yellow
+        if (statusLower.includes('pend')) return 'bg-warning text-dark';
         
         return 'bg-secondary';
-    }
-    
-    // Helper function to extract report path from legacy format
-    function extractReportPath(reportFile) {
-        if (!reportFile || typeof reportFile !== 'string') {
-            return null;
-        }
-        
-        // Try to match report_*.json or report_*.txt or report_*.md
-        const matches = reportFile.match(/report_[^"\s]+\.(json|txt|md)/g);
-        if (matches && matches.length > 0) {
-            return matches[0];
-        }
-        
-        return null;
     }
 </script>
 {% endblock %} 

@@ -209,6 +209,44 @@ def get_overall_vulnerability_stats():
             
     return overall_stats
 
+def get_top_vulnerability_types_stats(top_n=5):
+    """Thống kê N loại lỗ hổng phổ biến nhất từ tất cả các báo cáo JSON đã hoàn thành."""
+    vulnerability_counts = {}
+    
+    conn = sqlite3.connect(DB_NAME)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT report_json_path FROM scans WHERE status = ? AND report_json_path IS NOT NULL", ("Completed",))
+    rows = cursor.fetchall()
+    conn.close()
+
+    for row in rows:
+        report_path = row['report_json_path']
+        if report_path and os.path.exists(report_path):
+            try:
+                with open(report_path, 'r', encoding='utf-8') as f:
+                    report_data = json.load(f)
+                
+                if isinstance(report_data, dict) and 'vulnerabilities' in report_data and isinstance(report_data['vulnerabilities'], list):
+                    for vuln in report_data['vulnerabilities']:
+                        if isinstance(vuln, dict) and 'name' in vuln:
+                            vuln_name = vuln['name']
+                            vulnerability_counts[vuln_name] = vulnerability_counts.get(vuln_name, 0) + 1
+            except Exception as e:
+                logger.error(f"Error processing report file {report_path} for top vulnerability types: {e}")
+                # Không dừng lại nếu một file lỗi, tiếp tục xử lý các file khác
+
+    # Sắp xếp các lỗ hổng theo số lần xuất hiện giảm dần
+    sorted_vulnerabilities = sorted(vulnerability_counts.items(), key=lambda item: item[1], reverse=True)
+    
+    # Chuyển đổi thành list các dict cho dễ sử dụng ở frontend
+    top_vulnerabilities_list = [{
+        "name": name, 
+        "count": count
+    } for name, count in sorted_vulnerabilities[:top_n]]
+    
+    return top_vulnerabilities_list
+
 class ThreadedScan:
     def __init__(self, scan_id, target_url, use_deepseek, scan_type):
         self.scan_id = scan_id
@@ -309,7 +347,7 @@ def index():
 
 @app.route('/dashboard')
 def dashboard():
-    history = get_scan_history_from_db() 
+    history = get_scan_history_from_db()
     active_scans_with_details = []
     for scan_id, scan_obj in current_scans.items():
         if scan_obj.status in ["pending", "running"]:
@@ -324,12 +362,14 @@ def dashboard():
             })
     
     vulnerability_distribution = get_overall_vulnerability_stats()
+    top_vulnerabilities = get_top_vulnerability_types_stats(top_n=7) # Lấy top 7 cho đa dạng hơn
             
     return render_template('dashboard.html', 
                            title="Dashboard", 
                            scan_history=history[:10],
                            active_scans=active_scans_with_details,
-                           vulnerability_distribution=vulnerability_distribution)
+                           vulnerability_distribution=vulnerability_distribution,
+                           top_vulnerabilities=top_vulnerabilities)
 
 
 @app.route('/scan')
