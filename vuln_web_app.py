@@ -539,48 +539,62 @@ def scan_output(scan_id):
 
 @app.route('/api/scan/<scan_id>/result')
 def scan_result(scan_id):
-    # This route might be redundant if /api/scan/<scan_id> already returns the final result.
-    # However, it could be used specifically to fetch only the result field when the scan is completed/failed.
-    scan = current_scans.get(scan_id)
-    if not scan:
-        db_scan_details = get_scan_details_from_db(scan_id) # Thử tìm ID này trong DB (nếu scan_id là db_id)
-        if db_scan_details:
-             # Cần điều chỉnh để trả về report nếu có, hoặc một thông báo từ db_scan_details
-            report_path = db_scan_details.get('report_json_path') or db_scan_details.get('report_md_path')
-            if report_path and os.path.exists(report_path):
-                try:
-                    with open(report_path, 'r', encoding='utf-8') as f:
-                        # Nếu là JSON, parse và trả về, nếu MD, trả về text
-                        if report_path.endswith(".json"):
-                            return jsonify(json.load(f))
-                        else:
-                            return Response(f.read(), mimetype='text/markdown')
-                except Exception as e:
-                    return jsonify({"error": f"Error reading report file: {str(e)}"}), 500
-            return jsonify({"status": db_scan_details.get('status', 'Completed (from DB)'), "target_url": db_scan_details.get('target_url'), "message": "Scan details retrieved from database."})
-        return jsonify({"error": "Scan not found in active list or database with this ID"}), 404
-
-    if scan.status not in ["completed", "failed"]:
-        return jsonify({"status": scan.status, "message": "Scan is still running."})
-
-    # Nếu scan đã hoàn thành hoặc thất bại từ current_scans
-    if scan.report_file and scan.report_file.get("json") and os.path.exists(scan.report_file["json"]):
-        try:
-            with open(scan.report_file["json"], 'r', encoding='utf-8') as f:
-                return jsonify(json.load(f))
-        except Exception as e:
-            logger.error(f"Error reading JSON report {scan.report_file['json']} for scan {scan_id}: {e}")
-            return jsonify({"status": scan.status, "result_message": scan.result, "error": "Could not load JSON report."})
-    elif scan.report_file and scan.report_file.get("markdown") and os.path.exists(scan.report_file["markdown"]):
-        try:
-            with open(scan.report_file["markdown"], 'r', encoding='utf-8') as f:
-                # Trả về Markdown dưới dạng text/plain hoặc text/markdown
-                return Response(f.read(), mimetype='text/markdown')
-        except Exception as e:
-            logger.error(f"Error reading Markdown report {scan.report_file['markdown']} for scan {scan_id}: {e}")
-            return jsonify({"status": scan.status, "result_message": scan.result, "error": "Could not load Markdown report."})
+    scan = current_scans.get(str(scan_id)) # Ensure scan_id is string for dict key
     
-    return jsonify({"status": scan.status, "result_message": scan.result, "message": "Scan finished, but no report file found or accessible."})
+    report_to_send = None
+    error_message = None
+
+    if scan:
+        logger.info(f"API /result: Found active scan {scan_id}. Status: {scan.status}")
+        if scan.status == "Completed" and scan.report_json_path:
+            try:
+                # Ensure the path is safe and correct
+                # SCAN_REPORTS_DIR should be configured in the app
+                reports_dir = app.config.get('SCAN_REPORTS_DIR', 'scan_reports')
+                full_report_path = safe_join(reports_dir, os.path.basename(scan.report_json_path))
+                if os.path.exists(full_report_path):
+                    with open(full_report_path, 'r', encoding='utf-8') as f:
+                        report_to_send = json.load(f)
+                    logger.info(f"API /result: Successfully loaded JSON report {scan.report_json_path} for scan {scan_id}")
+                else:
+                    error_message = f"Report file not found: {scan.report_json_path}"
+                    logger.error(f"API /result: Report file {full_report_path} not found for scan {scan_id}")
+            except Exception as e:
+                error_message = f"Error loading report JSON: {str(e)}"
+                logger.error(f"API /result: Error loading report for scan {scan_id}: {e}", exc_info=True)
+        elif scan.status == "Failed" or scan.status == "Error":
+            error_message = scan.error_message or scan.final_result or f"Scan {scan_id} {scan.status.lower()}."
+        else: # Still running or initializing
+            return jsonify({"message": f"Scan {scan_id} is still {scan.status.lower()}. Please wait.", "status": scan.status}), 202
+    else:
+        # If not in current_scans, try to get details from DB (for completed/historic scans)
+        logger.info(f"API /result: Scan {scan_id} not in active scans. Checking database.")
+        db_scan_details = get_scan_details_from_db(scan_id) # scan_id should be int for DB
+        if db_scan_details and db_scan_details.get('report_json_path') and db_scan_details.get('status') == "Completed":
+            try:
+                reports_dir = app.config.get('SCAN_REPORTS_DIR', 'scan_reports')
+                # db_scan_details['report_json_path'] should already be a basename from get_scan_details_from_db
+                full_report_path = safe_join(reports_dir, db_scan_details['report_json_path'])
+                if os.path.exists(full_report_path):
+                    with open(full_report_path, 'r', encoding='utf-8') as f:
+                        report_to_send = json.load(f)
+                    logger.info(f"API /result: Successfully loaded historic JSON report {db_scan_details['report_json_path']} for scan {scan_id}")
+                else:
+                    error_message = f"Historic report file not found: {db_scan_details['report_json_path']}"
+                    logger.error(f"API /result: Historic report file {full_report_path} not found for scan {scan_id}")
+            except Exception as e:
+                error_message = f"Error loading historic report JSON: {str(e)}"
+                logger.error(f"API /result: Error loading historic report for scan {scan_id}: {e}", exc_info=True)
+        elif db_scan_details:
+            error_message = f"Scan {scan_id} from database has status '{db_scan_details.get('status')}' or no JSON report path."
+        else:
+            error_message = f"Scan {scan_id} not found in active scans or database."
+
+    if report_to_send:
+        return jsonify(report_to_send)
+    else:
+        logger.warning(f"API /result: For scan {scan_id}, no report to send. Error: {error_message}")
+        return jsonify({"error": error_message or "Scan result not available or scan not completed successfully."}), 404
 
 
 @app.route('/history')

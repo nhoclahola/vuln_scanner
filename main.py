@@ -239,6 +239,10 @@ def scan_website(target_url=None, scan_type="basic", current_scan_id=None, crawl
         logger.error(error_message)
         return error_message, None, None
     
+    # Initialize report paths to None at the beginning
+    report_json_path = None
+    report_md_path = None
+    
     # Normalize URL if needed
     if not target_url.startswith(('http://', 'https://')):
         target_url = "https://" + target_url
@@ -524,6 +528,7 @@ Conclude with an in-depth overall risk assessment, prioritized remediation steps
         with open(main_json_report_path, 'w', encoding='utf-8') as f:
             json.dump(final_json_dict, f, indent=4, ensure_ascii=False)
         logger.info(f"Main JSON report saved to: {main_json_report_path}")
+        report_json_path = main_json_report_path
     except json.JSONDecodeError:
         logger.error(f"JSON Report Formatter Agent did not return a valid JSON string. Raw output: {final_json_str[:500]}...") # Log snippet
         # Save the raw invalid output for debugging
@@ -551,14 +556,22 @@ Conclude with an in-depth overall risk assessment, prioritized remediation steps
     with open(md_report_path, 'w', encoding='utf-8') as f:
         f.write(str(markdown_content_to_save)) # Ensure it's a string
     logger.info(f"Markdown report saved to: {md_report_path}")
+    report_md_path = md_report_path
     
     status_message = f"Scan completed. Main JSON: {main_json_report_path}, Markdown: {md_report_path}"
     
-    log_scan_end(current_scan_id, "Completed" if report_json_path else "Failed", 
-                 report_json_path=main_json_report_path, 
-                 report_md_path=md_report_path)
+    # Log scan completion status to database (Moved from ThreadedScan)
+    # This should be called reliably, whether reports were successfully created or not.
+    # The status depends on whether report_json_path got a value.
+    final_status_for_db = "Completed" if report_json_path else "Failed"
+    # If an error occurred during scan that prevented report_json_path from being set, 
+    # it might still be "Failed". If status_message contains "Error:", it implies failure.
+    if "Error:" in status_message and not report_json_path:
+        final_status_for_db = "Error"
+        
+    log_scan_end(current_scan_id, final_status_for_db, report_json_path, report_md_path)
     
-    return status_message, main_json_report_path, md_report_path
+    return status_message, report_json_path, report_md_path
 
 def format_vulnerability_report(report_content):
     """
