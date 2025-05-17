@@ -10,6 +10,8 @@ from datetime import datetime
 from flask import Flask, render_template, request, jsonify, redirect, url_for, Response, stream_with_context
 import re
 from werkzeug.utils import safe_join
+import argparse
+import traceback
 
 # Thiết lập logging
 logging.basicConfig(
@@ -272,75 +274,85 @@ def get_top_vulnerability_types_stats(top_n=5):
     return top_vulnerabilities_list
 
 class ThreadedScan:
-    def __init__(self, scan_id, target_url, use_deepseek, scan_type):
+    def __init__(self, scan_id, target_url, use_deepseek, scan_type, max_depth=2, max_pages=100):
         self.scan_id = scan_id
         self.target_url = target_url
-        self.use_deepseek = use_deepseek # Sẽ được truyền từ /api/scan
+        self.use_deepseek = use_deepseek
         self.scan_type = scan_type
-        self.status = "pending"
-        self.result = None
-        self.output_capture = []
-        self.start_time = datetime.now()
-        self.end_time = None
-        self.progress = 0
-        self.report_file = None
-        self.db_scan_id = None 
-        
+        self.max_depth = max_depth
+        self.max_pages = max_pages
+        self.output_buffer = []
+        self.final_result = None
+        self.status = "Initializing"
+        self.progress = 0  # Initialize progress
+        self.start_time = datetime.now()  # Initialize start_time
+        self.end_time = None  # Initialize end_time
+        self.error_message = None
+        self.report_json_path = None
+        self.report_md_path = None
+        self.thread = threading.Thread(target=self.run, daemon=True)
+
     def run(self):
-        self.status = "running"
+        self.status = "Running"
+        self.start_time = datetime.now() # Ensure start_time is set when run starts
         original_stdout = sys.stdout
         original_stderr = sys.stderr
-        try:
-            sys.stdout = OutputCapture(self)
-            sys.stderr = OutputCapture(self)
-            
-            # log_scan_start được import từ main
-            self.db_scan_id = log_scan_start(self.target_url, self.scan_type) 
-            
-            logger.info(f"ThreadedScan: Starting scan for {self.target_url} with db_scan_id: {self.db_scan_id}, use_deepseek: {self.use_deepseek}, scan_type: {self.scan_type}")
-            
-            # scan_website được import từ main
-            status_message, json_report_path, md_report_path = scan_website(
-                target_url=self.target_url, 
-                use_deepseek=self.use_deepseek, 
-                scan_type=self.scan_type,
-                current_scan_id=self.db_scan_id
-            )
-            
-            self.result = status_message
-            self.status = "completed"
-            self.progress = 100
-            self.end_time = datetime.now()
-            
-            self.report_file = {
-                "json": json_report_path,
-                "markdown": md_report_path
-            }
-            
-            # log_scan_end được import từ main
-            if self.db_scan_id:
-                 # log_scan_end trong main.py đã tự động cập nhật end_time
-                 # Nó mong muốn status, report_json_path, report_md_path, scan_id
-                 # status_message ở đây là thông báo chung, status trong DB nên là "Completed"
-                log_scan_end(self.db_scan_id, "Completed", json_report_path, md_report_path)
-            
-        except Exception as e:
-            self.status = "failed"
-            self.result = f"Error during scan: {str(e)}"
-            self.end_time = datetime.now()
-            logger.error(f"Scan error in ThreadedScan for {self.target_url}: {str(e)}", exc_info=True)
-            if self.db_scan_id:
-                # log_scan_end trong main.py cũng xử lý trường hợp Error
-                log_scan_end(self.db_scan_id, "Error") # Chỉ truyền status "Error"
-        finally:
-            sys.stdout = original_stdout
-            sys.stderr = original_stderr
-            if self.scan_id in current_scans: # Dọn dẹp current_scans khi luồng kết thúc
-                 # current_scans[self.scan_id] is the ThreadedScan object itself
-                 # We might want to keep it for a while for status checks, or remove it if status is final
-                 # For now, let's assume it stays until explicitly cleared or overwritten by a new scan with same ID (if IDs are reused)
-                 pass
+        # Capture stdout and stderr for this scan only
+        output_capture = OutputCapture(self) # UNCOMMENTED
+        sys.stdout = output_capture           # UNCOMMENTED
+        sys.stderr = output_capture           # UNCOMMENTED
 
+        db_scan_id = self.scan_id 
+        logger.info(f"ThreadedScan (ID: {self.scan_id}) starting scan_website for {self.target_url} with depth {self.max_depth} and pages {self.max_pages}.")
+
+        try:
+            cli_args_dict = {
+                'deepseek': self.use_deepseek,
+                'openai': not self.use_deepseek
+            }
+            cli_args_ns = argparse.Namespace(**cli_args_dict)
+
+            status_message, json_report, md_report = scan_website(
+                target_url=self.target_url, 
+                scan_type=self.scan_type,
+                current_scan_id=db_scan_id, 
+                crawl_max_depth=self.max_depth,
+                crawl_max_pages=self.max_pages,
+                cli_args=cli_args_ns
+            )
+            self.final_result = status_message
+            self.report_json_path = json_report
+            self.report_md_path = md_report
+            self.status = "Completed" if json_report else "Failed"
+            if not json_report and "Error:" in status_message:
+                 self.error_message = status_message
+            
+            logger.info(f"ThreadedScan (ID: {self.scan_id}) for {self.target_url} completed. Status: {self.status}")
+            self.progress = 100 # Set progress to 100 on completion
+
+        except Exception as e:
+            self.status = "Error"
+            self.error_message = f"An unexpected error occurred in ThreadedScan: {str(e)}"
+            logger.error(f"Exception in ThreadedScan (ID: {self.scan_id}) for {self.target_url}: {traceback.format_exc()}")
+            try:
+                conn_check = sqlite3.connect(DB_NAME)
+                cursor_check = conn_check.cursor()
+                cursor_check.execute("SELECT status FROM scans WHERE id = ?", (db_scan_id,))
+                row = cursor_check.fetchone()
+                conn_check.close()
+                if row and row[0] not in ["Completed", "Failed", "Error"]:
+                    log_scan_end(db_scan_id, "Error")
+            except Exception as db_exc:
+                logger.error(f"Failed to update DB on ThreadedScan exception: {db_exc}")
+        finally:
+            self.end_time = datetime.now() # Set end_time in finally block
+            # Restore original stdout/stderr
+            sys.stdout = original_stdout      # UNCOMMENTED
+            sys.stderr = original_stderr      # UNCOMMENTED
+            # Append final status to buffer if desired
+            # self.output_buffer.append(f"\n--- Scan Process Concluded (Status: {self.status}) ---")
+            # if self.error_message:
+            #    self.output_buffer.append(f"Error Details: {self.error_message}")
 
 class OutputCapture(object):
     def __init__(self, scan):
@@ -353,7 +365,7 @@ class OutputCapture(object):
 
         # Lưu trữ output gốc (có thể chứa emoji) cho client
         if self.scan:
-            self.scan.output_capture.append(text)
+            self.scan.output_buffer.append(text)
             
             # Logic cập nhật progress dựa trên keywords
             current_progress = self.scan.progress
@@ -441,56 +453,80 @@ def scan_page():
 
 @app.route('/api/scan', methods=['POST'])
 def start_scan():
-    data = request.get_json()
+    data = request.json
     target_url = data.get('target_url')
-    scan_type = data.get('scan_type', 'basic') # 'basic' or 'full'
-    # Lấy lựa chọn LLM từ form, mặc định là deepseek nếu không có
-    llm_choice = data.get('llm_provider', 'deepseek') 
-    use_deepseek_flag = True if llm_choice == 'deepseek' else False
+    scan_type = data.get('scan_type', 'basic')
+    llm_provider = data.get('llm_provider', 'deepseek')
+    
+    try:
+        max_depth = int(data.get('max_depth', 2))
+        if max_depth < 0:
+            max_depth = 0
+    except (ValueError, TypeError):
+        max_depth = 2
+
+    try:
+        max_pages = int(data.get('max_pages', 100))
+        if max_pages < 1:
+            max_pages = 100
+    except (ValueError, TypeError):
+        max_pages = 100
 
     if not target_url:
         return jsonify({"error": "Target URL is required"}), 400
 
-    # Tạo một ID duy nhất cho lần quét này (ví dụ: dựa trên timestamp)
-    # scan_id = str(int(time.time())) # ID này cho web app, db_scan_id là từ DB
-    scan_id = f"webscan_{int(time.time() * 1000)}"
-
-
-    # Kiểm tra API keys trước khi bắt đầu luồng (nếu có thể)
-    # Logic này đã có trong scan_website, nhưng một check sơ bộ ở đây có thể hữu ích
-    # Tuy nhiên, để tránh lặp code, ta có thể dựa vào check trong scan_website
-    # và scan_website sẽ trả về lỗi nếu key không hợp lệ.
-
-    scan_thread_obj = ThreadedScan(scan_id, target_url, use_deepseek_flag, scan_type)
-    current_scans[scan_id] = scan_thread_obj
+    use_deepseek_flag = llm_provider == 'deepseek'
     
-    thread = threading.Thread(target=scan_thread_obj.run)
-    thread.daemon = True # Để luồng tự thoát khi app chính thoát
-    thread.start()
+    try:
+        scan_id = log_scan_start(target_url, scan_type) 
+    except Exception as e:
+        logger.error(f"Failed to log scan start in DB for {target_url}: {e}")
+        return jsonify({"error": f"Failed to initialize scan in database: {e}"}), 500
+
+    logger.info(f"Received scan request for {target_url}, Type: {scan_type}, LLM: {llm_provider}, MaxDepth: {max_depth}, MaxPages: {max_pages}. DB Scan ID: {scan_id}")
+
+    scan_instance = ThreadedScan(scan_id, target_url, use_deepseek_flag, scan_type, max_depth, max_pages)
+    scan_instance.thread.start()
+    current_scans[str(scan_id)] = scan_instance
     
-    logger.info(f"Scan initiated for {target_url} with web_scan_id: {scan_id}, use_deepseek: {use_deepseek_flag}, scan_type: {scan_type}")
-    return jsonify({"message": "Scan started", "scan_id": scan_id, "status_url": url_for('scan_status', scan_id=scan_id)})
+    return jsonify({"message": "Scan started", "scan_id": scan_id}), 202
 
 @app.route('/api/scan/<scan_id>')
 def scan_status(scan_id):
     scan = current_scans.get(scan_id)
     if not scan:
-        # Nếu không có trong current_scans, thử tìm trong DB (có thể là scan đã hoàn thành từ phiên trước)
-        # Đây là một cải tiến, hiện tại current_scans chỉ chứa các scan của phiên này.
-        # Để đơn giản, nếu không có trong current_scans, coi như không tìm thấy cho API status này.
         return jsonify({"error": "Scan not found or already completed and cleared from active list"}), 404
     
+    # Check if start_time and end_time attributes exist, otherwise default to None or a placeholder
+    start_time_iso = None
+    if hasattr(scan, 'start_time') and scan.start_time:
+        try:
+            start_time_iso = scan.start_time.isoformat()
+        except AttributeError: # In case start_time is not a datetime object yet
+            start_time_iso = str(scan.start_time) 
+
+    end_time_iso = None
+    if hasattr(scan, 'end_time') and scan.end_time:
+        try:
+            end_time_iso = scan.end_time.isoformat()
+        except AttributeError:
+            end_time_iso = str(scan.end_time)
+            
+    report_path_to_return = scan.report_json_path if scan.report_json_path else scan.report_md_path
+    if report_path_to_return:
+        report_path_to_return = os.path.basename(report_path_to_return)
+
     return jsonify({
-        "scan_id": scan.scan_id,
-        "db_scan_id": scan.db_scan_id,
+        "scan_id": scan.scan_id, # This is the DB ID
+        "db_scan_id": scan.scan_id, # Using scan_id as db_scan_id as they are the same now
         "target_url": scan.target_url,
         "scan_type": scan.scan_type,
         "status": scan.status,
-        "progress": scan.progress, # Giả sử có thuộc tính progress trong ThreadedScan
-        "result": scan.result, # Kết quả cuối cùng (thông báo hoặc lỗi)
-        "start_time": scan.start_time.isoformat() if scan.start_time else None,
-        "end_time": scan.end_time.isoformat() if scan.end_time else None,
-        "report_file": scan.report_file
+        "progress": getattr(scan, 'progress', 0), # Default to 0 if no progress attr
+        "result": getattr(scan, 'final_result', scan.error_message if scan.error_message else scan.status), # Use final_result or error_message
+        "start_time": start_time_iso,
+        "end_time": end_time_iso,
+        "report_file": report_path_to_return # Return basename of the report file
     })
 
 @app.route('/api/scan/<scan_id>/output')
@@ -498,7 +534,7 @@ def scan_output(scan_id):
     scan = current_scans.get(scan_id)
     if not scan:
         return jsonify({"error": "Scan not found"}), 404
-    return Response("".join(scan.output_capture), mimetype='text/plain')
+    return Response("".join(scan.output_buffer), mimetype='text/plain')
 
 
 @app.route('/api/scan/<scan_id>/result')

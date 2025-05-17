@@ -26,7 +26,7 @@
                     <div class="form-text">Enter the full URL of the website you want to scan (including http:// or https://)</div>
                 </div>
                 
-                <div class="row mb-4">
+                <div class="row mb-3">
                     <div class="col-md-6">
                         <label class="form-label">Scan Type</label>
                         <div class="form-check">
@@ -58,6 +58,19 @@
                                 OpenAI
                             </label>
                         </div>
+                    </div>
+                </div>
+
+                <div class="row mb-4">
+                    <div class="col-md-6">
+                        <label for="max_depth" class="form-label">Max Crawl Depth</label>
+                        <input type="number" class="form-control" id="max_depth" name="max_depth" value="2" min="0">
+                        <div class="form-text">Maximum depth to crawl. 0 for unlimited (not recommended for large sites).</div>
+                    </div>
+                    <div class="col-md-6">
+                        <label for="max_pages" class="form-label">Max Pages to Crawl</label>
+                        <input type="number" class="form-control" id="max_pages" name="max_pages" value="100" min="1">
+                        <div class="form-text">Maximum number of pages to crawl.</div>
                     </div>
                 </div>
                 
@@ -218,9 +231,21 @@
         const targetUrl = form.elements['url'].value;
         const scanType = form.elements['scan_type'] ? form.elements['scan_type'].value : 'basic';
         const llmProvider = form.elements['llm_provider'] ? form.elements['llm_provider'].value : 'deepseek';
+        const maxDepth = form.elements['max_depth'] ? parseInt(form.elements['max_depth'].value, 10) : 2;
+        const maxPages = form.elements['max_pages'] ? parseInt(form.elements['max_pages'].value, 10) : 100;
 
         if (!targetUrl) {
             showErrorInPage('Please enter a valid URL');
+            return;
+        }
+        
+        // Basic validation for maxDepth and maxPages
+        if (isNaN(maxDepth) || maxDepth < 0) {
+            showErrorInPage('Max Depth must be a non-negative number.');
+            return;
+        }
+        if (isNaN(maxPages) || maxPages < 1) {
+            showErrorInPage('Max Pages must be at least 1.');
             return;
         }
 
@@ -243,7 +268,9 @@
         const payload = {
             target_url: targetUrl,
             scan_type: scanType,
-            llm_provider: llmProvider
+            llm_provider: llmProvider,
+            max_depth: maxDepth,
+            max_pages: maxPages
         };
 
         fetch('/api/scan', {

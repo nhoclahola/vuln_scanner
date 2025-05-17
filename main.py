@@ -217,15 +217,17 @@ from tools.security_tools import (
 # Tải biến môi trường
 # load_dotenv() # Removed: API keys will be loaded from settings.json
 
-def scan_website(target_url=None, use_deepseek=True, scan_type="basic", current_scan_id=None):
+def scan_website(target_url=None, scan_type="basic", current_scan_id=None, crawl_max_depth=2, crawl_max_pages=100, cli_args=None):
     """
     Scan target website and return vulnerability assessment results
     
     Args:
         target_url (str): Target website URL
-        use_deepseek (bool): Whether to use DeepSeek LLM
         scan_type (str): Scan type - "basic" or "full"
         current_scan_id (int): The ID of the current scan in the database
+        crawl_max_depth (int): Maximum depth for the web crawler.
+        crawl_max_pages (int): Maximum number of pages for the web crawler.
+        cli_args (argparse.Namespace): Command line arguments for LLM selection.
         
     Returns:
         str: Vulnerability assessment results (status message)
@@ -235,315 +237,328 @@ def scan_website(target_url=None, use_deepseek=True, scan_type="basic", current_
     if not target_url or target_url.strip() == "":
         error_message = "Error: URL not provided. Please enter a URL to scan."
         logger.error(error_message)
-        # Trả về 3 giá trị, các đường dẫn file là None
         return error_message, None, None
     
     # Normalize URL if needed
     if not target_url.startswith(('http://', 'https://')):
         target_url = "https://" + target_url
     
-    logger.info(f"Target URL: {target_url}")
+    logger.info(f"Target URL: {target_url}, Max Depth: {crawl_max_depth}, Max Pages: {crawl_max_pages}")
     
     # Initialize LLM
+    llm = None
+    chosen_llm_provider = "None"
+
+    deepseek_api_key = APP_SETTINGS.get("DEEPSEEK_API_KEY")
+    deepseek_api_base = APP_SETTINGS.get("DEEPSEEK_API_BASE")
+    openai_api_key = APP_SETTINGS.get("OPENAI_API_KEY")
+    openai_api_base = APP_SETTINGS.get("OPENAI_API_BASE")
+
+    # Helper to check for placeholder or missing keys
+    def is_key_invalid(key_value, placeholder):
+        return not key_value or key_value == placeholder
+
+    is_deepseek_key_valid = not is_key_invalid(deepseek_api_key, PLACEHOLDER_DEEPSEEK_API_KEY)
+    is_openai_key_valid = not is_key_invalid(openai_api_key, PLACEHOLDER_OPENAI_API_KEY)
+    
     try:
-        llm = None # Initialize llm to None
-        if use_deepseek:
-            deepseek_api_key = APP_SETTINGS.get("DEEPSEEK_API_KEY")
-            deepseek_api_base = APP_SETTINGS.get("DEEPSEEK_API_BASE")
-            
-            is_ds_key_invalid = not deepseek_api_key or deepseek_api_key == PLACEHOLDER_DEEPSEEK_API_KEY
-            is_ds_base_invalid_for_custom = deepseek_api_base == PLACEHOLDER_DEEPSEEK_API_BASE # Placeholder means "use default" or "needs config"
-            # Deepseek base can be empty to use default, so only placeholder is strictly invalid for custom setting
-            
-            if is_ds_key_invalid:
-                logger.warning(
-                    "DeepSeek API key is missing or uses placeholder. "
-                    "Switching to OpenAI if configured."
-                )
-                use_deepseek = False
-            else:
+        if cli_args and cli_args.deepseek: # User explicitly requested DeepSeek
+            logger.info("User explicitly selected DeepSeek LLM via --deepseek flag.")
+            if is_deepseek_key_valid:
                 llm_ds_params = {
-                    "model": "deepseek-chat",
-                    "provider": "openai", # litellm uses openai provider for deepseek
-                    "api_key": deepseek_api_key,
-                    "temperature": 0.7,
-                    "context_window": 128000,
-                    "max_tokens": 4096
+                    "model": "deepseek-chat", "provider": "openai", "api_key": deepseek_api_key,
+                    "temperature": 0.7, "context_window": 128000, "max_tokens": 4096
                 }
-                if deepseek_api_base and not is_ds_base_invalid_for_custom and deepseek_api_base.strip() != "":
+                if deepseek_api_base and not is_key_invalid(deepseek_api_base, PLACEHOLDER_DEEPSEEK_API_BASE) and deepseek_api_base.strip():
                     llm_ds_params["api_base"] = deepseek_api_base
-                    os.environ["OPENAI_API_BASE"] = deepseek_api_base # For litellm if it relies on this for deepseek
-                    logger.info(f"Using DeepSeek API with custom base {deepseek_api_base} and 128K context window")
-                else:
-                    # If OPENAI_API_BASE was set by previous OpenAI config, clear it for Deepseek default
-                    if "OPENAI_API_BASE" in os.environ: del os.environ["OPENAI_API_BASE"]
-                    logger.info("Using DeepSeek API with default base and 128K context window")
-                
-                os.environ["OPENAI_API_KEY"] = deepseek_api_key # For litellm
+                    os.environ["OPENAI_API_BASE"] = deepseek_api_base 
+                elif "OPENAI_API_BASE" in os.environ: del os.environ["OPENAI_API_BASE"]
+                os.environ["OPENAI_API_KEY"] = deepseek_api_key
                 llm = LLM(**llm_ds_params)
-        
-        if not use_deepseek: # This means either OpenAI was chosen, or DeepSeek failed
-            openai_api_key = APP_SETTINGS.get("OPENAI_API_KEY")
-            openai_api_base = APP_SETTINGS.get("OPENAI_API_BASE")
-
-            is_openai_key_invalid = not openai_api_key or openai_api_key == PLACEHOLDER_OPENAI_API_KEY
-            
-            # OpenAI base can be empty or placeholder to use default. It's only an issue if it's set to placeholder but not the one indicating default.
-            # For OpenAI, typically users leave it blank for the default. The placeholder helps guide them.
-            should_use_custom_openai_base = (openai_api_base and 
-                                             openai_api_base != PLACEHOLDER_OPENAI_API_BASE and 
-                                             openai_api_base.strip() != "")
-
-            if is_openai_key_invalid:
-                err_msg = "Error: OpenAI API key is missing or uses a placeholder value in settings.json."
-                # Check if DeepSeek was also unconfigured
-                ds_key_check = APP_SETTINGS.get("DEEPSEEK_API_KEY")
-                if not ds_key_check or ds_key_check == PLACEHOLDER_DEEPSEEK_API_KEY:
-                     err_msg = ("Error: API keys for both DeepSeek and OpenAI are missing or use placeholder values "
-                                "in settings.json. Please configure at least one provider.")
+                chosen_llm_provider = "DeepSeek (user-specified)"
+                logger.info(f"Using DeepSeek LLM (user-specified) with base: {llm_ds_params.get('api_base', 'default')}")
+            else:
+                err_msg = "Error: --deepseek flag was used, but DeepSeek API key is missing or uses a placeholder in settings.json."
                 logger.error(err_msg)
                 return err_msg, None, None
-            
-            llm_openai_params = {
-                "model": "gpt-3.5-turbo",
-                "provider": "openai",
-                "api_key": openai_api_key,
-                "temperature": 0.7,
-                "context_window": 16000,
-                "max_tokens": 4096
-            }
-
-            if should_use_custom_openai_base:
-                llm_openai_params["api_base"] = openai_api_base
-                os.environ["OPENAI_API_BASE"] = openai_api_base
-                logger.info(f"Using OpenAI API with custom base URL: {openai_api_base} and 16K context window")
+        elif cli_args and cli_args.openai: # User explicitly requested OpenAI
+            logger.info("User explicitly selected OpenAI LLM via --openai flag.")
+            if is_openai_key_valid:
+                llm_openai_params = {
+                    "model": "gpt-3.5-turbo", "provider": "openai", "api_key": openai_api_key,
+                    "temperature": 0.7, "context_window": 16000, "max_tokens": 4096
+                }
+                if openai_api_base and not is_key_invalid(openai_api_base, PLACEHOLDER_OPENAI_API_BASE) and openai_api_base.strip():
+                    llm_openai_params["api_base"] = openai_api_base
+                    os.environ["OPENAI_API_BASE"] = openai_api_base
+                elif "OPENAI_API_BASE" in os.environ: del os.environ["OPENAI_API_BASE"] # Clear if set by other logic
+                os.environ["OPENAI_API_KEY"] = openai_api_key
+                llm = LLM(**llm_openai_params)
+                chosen_llm_provider = "OpenAI (user-specified)"
+                logger.info(f"Using OpenAI LLM (user-specified) with base: {llm_openai_params.get('api_base', 'default')}")
             else:
-                # If OPENAI_API_BASE was set by DeepSeek (as it also uses this env var for litellm), clear it for OpenAI default
-                # This case is tricky because both might use the same env var for litellm.
-                # The LLM constructor param `api_base` should take precedence.
-                if "OPENAI_API_BASE" in os.environ:
-                    # Only delete if it wasn't explicitly set for OpenAI default (which means it should be unset)
-                    # Or if it was set by Deepseek custom base
-                    current_env_base = os.environ["OPENAI_API_BASE"]
-                    ds_base_val = APP_SETTINGS.get("DEEPSEEK_API_BASE")
-                    if current_env_base == ds_base_val and ds_base_val != openai_api_base : # if env was set by deepseek and not same as intended openai base
-                         del os.environ["OPENAI_API_BASE"]
-                logger.info("Using OpenAI API with default base URL and 16K context window")
-            
-            os.environ["OPENAI_API_KEY"] = openai_api_key
-            llm = LLM(**llm_openai_params)
+                err_msg = "Error: --openai flag was used, but OpenAI API key is missing or uses a placeholder in settings.json."
+                logger.error(err_msg)
+                return err_msg, None, None
+        else: # Default behavior: Try DeepSeek, then OpenAI
+            logger.info("No explicit LLM specified. Attempting default selection: DeepSeek then OpenAI.")
+            if is_deepseek_key_valid:
+                llm_ds_params = {
+                    "model": "deepseek-chat", "provider": "openai", "api_key": deepseek_api_key,
+                    "temperature": 0.7, "context_window": 128000, "max_tokens": 4096
+                }
+                if deepseek_api_base and not is_key_invalid(deepseek_api_base, PLACEHOLDER_DEEPSEEK_API_BASE) and deepseek_api_base.strip():
+                    llm_ds_params["api_base"] = deepseek_api_base
+                    os.environ["OPENAI_API_BASE"] = deepseek_api_base
+                elif "OPENAI_API_BASE" in os.environ: del os.environ["OPENAI_API_BASE"]
+                os.environ["OPENAI_API_KEY"] = deepseek_api_key
+                llm = LLM(**llm_ds_params)
+                chosen_llm_provider = "DeepSeek (default)"
+                logger.info(f"Using DeepSeek LLM (default) with base: {llm_ds_params.get('api_base', 'default')}")
+            elif is_openai_key_valid:
+                logger.info("DeepSeek key not valid or not found. Attempting to use OpenAI as fallback.")
+                llm_openai_params = {
+                    "model": "gpt-3.5-turbo", "provider": "openai", "api_key": openai_api_key,
+                    "temperature": 0.7, "context_window": 16000, "max_tokens": 4096
+                }
+                if openai_api_base and not is_key_invalid(openai_api_base, PLACEHOLDER_OPENAI_API_BASE) and openai_api_base.strip():
+                    llm_openai_params["api_base"] = openai_api_base
+                    os.environ["OPENAI_API_BASE"] = openai_api_base
+                elif "OPENAI_API_BASE" in os.environ: del os.environ["OPENAI_API_BASE"]
+                os.environ["OPENAI_API_KEY"] = openai_api_key
+                llm = LLM(**llm_openai_params)
+                chosen_llm_provider = "OpenAI (default fallback)"
+                logger.info(f"Using OpenAI LLM (default fallback) with base: {llm_openai_params.get('api_base', 'default')}")
+            else:
+                err_msg = ("Error: API keys for both DeepSeek and OpenAI are missing or use placeholder values "
+                           "in settings.json. Please configure at least one provider or use --deepseek/--openai flags "
+                           "with a valid key for the chosen provider.")
+                logger.error(err_msg)
+                return err_msg, None, None
 
-        if llm is None:
-            # This case should ideally be caught by the key checks above, 
-            # but as a fallback if neither use_deepseek nor not use_deepseek path initializes llm.
-            final_err_msg = "Error: LLM could not be initialized. API keys for both providers might be missing or invalid in settings.json."
+        if llm is None: # Should be caught above, but as a final safety net
+            final_err_msg = "Error: LLM could not be initialized. This indicates an unexpected issue with LLM selection logic."
             logger.error(final_err_msg)
             return final_err_msg, None, None
 
-        os.environ["TARGET_URL"] = target_url
-        
-        crawler_tools = [web_crawler, javascript_analyzer]
-        scanner_tools = [scan_xss, scan_sqli, scan_open_redirect, scan_csrf, scan_path_traversal]
-        info_gatherer_tools = [http_header_fetcher, ssl_tls_analyzer, cms_detector, port_scanner, security_headers_analyzer]
-        security_analyst_tools = [analyze_vulnerability_severity, owasp_risk_score]
-        
-        crawler_agent = create_crawler_agent(tools=crawler_tools, llm=llm, memory=False)
-        scanner_agent = create_endpoint_scanner_agent(tools=scanner_tools, llm=llm, memory=False)
-        info_gatherer_agent = create_information_gatherer_agent(tools=info_gatherer_tools, llm=llm, memory=False)
-        security_analyst_agent = create_security_analyst_agent(tools=security_analyst_tools, llm=llm, memory=False)
-        
-        info_gathering_tasks_defs = [
-            ("Analyze HTTP headers for security configuration on {target_url}. Use http_header_fetcher tool to retrieve and analyze HTTP response headers. Look for missing security headers and server information disclosure.",
-             "A detailed analysis of HTTP headers with security recommendations"),
-            ("Analyze SSL/TLS configuration on {target_url}. Use ssl_tls_analyzer tool to check for outdated protocols, weak ciphers, and certificate issues.",
-             "A report on SSL/TLS security status with identified weaknesses"),
-            ("Detect CMS and technologies used by {target_url}. Use cms_detector tool to identify content management systems, frameworks, and server technologies.",
-             "A list of detected technologies and potential version information")
-        ]
-
-        tasks = []
-        if scan_type == "basic":
-            logger.info("Performing basic scan (basic information and common vulnerabilities)...")
-            tasks = [
-                Task(description=website_crawling_task(crawler_agent).description.format(target_url=target_url), expected_output=website_crawling_task(crawler_agent).expected_output, agent=crawler_agent),
-                Task(description=info_gathering_tasks_defs[0][0].format(target_url=target_url), expected_output=info_gathering_tasks_defs[0][1], agent=info_gatherer_agent),
-                Task(description=xss_scanning_task(scanner_agent).description.format(target_url=target_url), expected_output=xss_scanning_task(scanner_agent).expected_output, agent=scanner_agent, context_aware=True),
-                Task(description=sql_injection_scanning_task(scanner_agent).description.format(target_url=target_url), expected_output=sql_injection_scanning_task(scanner_agent).expected_output, agent=scanner_agent, context_aware=True),
-                Task(description=f"Create a comprehensive summary of all vulnerabilities discovered on {target_url}. Consolidate findings from all previous tasks.", 
-                     expected_output="A comprehensive vulnerability summary report including all findings and recommendations.", 
-                     agent=security_analyst_agent, context_aware=True, async_execution=False)
-            ]
-        else: # full scan
-            logger.info("Performing full scan (all vulnerabilities)...")
-            tasks = [
-                Task(description=website_crawling_task(crawler_agent).description.format(target_url=target_url), expected_output=website_crawling_task(crawler_agent).expected_output, agent=crawler_agent),
-                Task(description=api_endpoint_discovery_task(crawler_agent).description.format(target_url=target_url), expected_output=api_endpoint_discovery_task(crawler_agent).expected_output, agent=crawler_agent, context_aware=True),
-                Task(description=dynamic_content_analysis_task(crawler_agent).description.format(target_url=target_url), expected_output=dynamic_content_analysis_task(crawler_agent).expected_output, agent=crawler_agent, context_aware=True),
-                Task(description=endpoint_categorization_task(crawler_agent).description.format(target_url=target_url), expected_output=endpoint_categorization_task(crawler_agent).expected_output, agent=crawler_agent, context_aware=True),
-                Task(description=info_gathering_tasks_defs[0][0].format(target_url=target_url), expected_output=info_gathering_tasks_defs[0][1], agent=info_gatherer_agent, context_aware=True),
-                Task(description=info_gathering_tasks_defs[1][0].format(target_url=target_url), expected_output=info_gathering_tasks_defs[1][1], agent=info_gatherer_agent, context_aware=True),
-                Task(description=info_gathering_tasks_defs[2][0].format(target_url=target_url), expected_output=info_gathering_tasks_defs[2][1], agent=info_gatherer_agent, context_aware=True),
-                Task(description=f"Scan open ports on {target_url}. Use port_scanner tool.", expected_output="List of open ports and services.", agent=info_gatherer_agent, context_aware=True),
-                Task(description=f"Analyze security headers on {target_url}. Use security_headers_analyzer tool.", expected_output="Detailed analysis of security headers.", agent=info_gatherer_agent, context_aware=True),
-                Task(description=xss_scanning_task(scanner_agent).description.format(target_url=target_url), expected_output=xss_scanning_task(scanner_agent).expected_output, agent=scanner_agent, context_aware=True),
-                Task(description=sql_injection_scanning_task(scanner_agent).description.format(target_url=target_url), expected_output=sql_injection_scanning_task(scanner_agent).expected_output, agent=scanner_agent, context_aware=True),
-                Task(description=open_redirect_scanning_task(scanner_agent).description.format(target_url=target_url), expected_output=open_redirect_scanning_task(scanner_agent).expected_output, agent=scanner_agent, context_aware=True),
-                Task(description=csrf_scanning_task(scanner_agent).description.format(target_url=target_url), expected_output=csrf_scanning_task(scanner_agent).expected_output, agent=scanner_agent, context_aware=True),
-                Task(description=path_traversal_scanning_task(scanner_agent).description.format(target_url=target_url), expected_output=path_traversal_scanning_task(scanner_agent).expected_output, agent=scanner_agent, context_aware=True),
-                Task(description=f"Create a comprehensive summary of ALL vulnerabilities discovered on {target_url}. Consolidate findings from ALL previous tasks.", 
-                     expected_output="A comprehensive vulnerability summary report including all findings, risk ratings, and strategic recommendations.", 
-                     agent=security_analyst_agent, context_aware=True, async_execution=False)
-            ]
-        
-        logger.info("\nNote: The scanning process may take several minutes to hours, depending on the target website and scan type.")
-        
-        vulnerability_scanner_crew = Crew(
-            agents=[crawler_agent, scanner_agent, info_gatherer_agent, security_analyst_agent],
-            tasks=tasks,
-            process=Process.sequential,
-            verbose=True,
-            memory=False,
-            # context_strategy and max_step_tokens can be added if needed based on full file content
-        )
-        
-        logger.info("\nStarting vulnerability scan crew...")
-        
-        # Simplified inputs for kickoff
-        crew_inputs = {'target_url': target_url}
-        analyst_raw_output = vulnerability_scanner_crew.kickoff(inputs=crew_inputs)
-        
-        analyst_report_content = ""
-        if isinstance(analyst_raw_output, str):
-            analyst_report_content = analyst_raw_output
-        elif hasattr(analyst_raw_output, 'raw_output') and analyst_raw_output.raw_output: # Check TaskOutput
-             analyst_report_content = analyst_raw_output.raw_output
-        elif hasattr(analyst_raw_output, 'result') and analyst_raw_output.result:
-             analyst_report_content = analyst_raw_output.result
-        elif hasattr(analyst_raw_output, 'raw') and analyst_raw_output.raw: # Older CrewAI versions
-            analyst_report_content = analyst_raw_output.raw
-        elif isinstance(analyst_raw_output, dict) and 'final_output' in analyst_raw_output: # Crew output dict
-            analyst_report_content = analyst_raw_output['final_output']
-        else:
-            analyst_report_content = str(analyst_raw_output) # Fallback
-
-        logger.info("Vulnerability scan crew finished. Preparing reports.")
-        save_interim_results("final_analyst_summary", "security_analyst", analyst_report_content, target_url)
-
-        # --- Create and run JSON Formatting Crew ---
-        logger.info("Starting JSON report formatting...")
-        json_formatter_agent = create_json_report_formatter_agent(llm=llm)
-        
-        # Ensure analyst_report_content is a string for the formatting task description
-        analyst_report_content_str_for_task = analyst_report_content
-        if not isinstance(analyst_report_content_str_for_task, str):
-            try:
-                analyst_report_content_str_for_task = json.dumps(analyst_report_content_str_for_task, indent=2)
-            except TypeError: # Handle non-serializable objects if any by converting to string
-                 analyst_report_content_str_for_task = str(analyst_report_content_str_for_task)
-
-
-        json_formatting_task_instance = create_json_report_formatting_task(
-            agent=json_formatter_agent,
-            original_report_content=analyst_report_content_str_for_task
-        )
-
-        json_formatting_crew = Crew(
-            agents=[json_formatter_agent],
-            tasks=[json_formatting_task_instance],
-            verbose=True, # Set to False if too noisy for this step
-            memory=False
-        )
-        
-        formatter_crew_output = json_formatting_crew.kickoff()
-        
-        final_json_str = ""
-        if isinstance(formatter_crew_output, str):
-            final_json_str = formatter_crew_output
-        elif hasattr(formatter_crew_output, 'raw_output') and formatter_crew_output.raw_output:
-             final_json_str = formatter_crew_output.raw_output
-        elif hasattr(formatter_crew_output, 'result') and formatter_crew_output.result:
-             final_json_str = formatter_crew_output.result
-        elif hasattr(formatter_crew_output, 'raw') and formatter_crew_output.raw: # Older CrewAI versions
-            final_json_str = formatter_crew_output.raw
-        elif isinstance(formatter_crew_output, dict) and 'final_output' in formatter_crew_output:
-            final_json_str = formatter_crew_output['final_output']
-        else:
-            final_json_str = str(formatter_crew_output) # Fallback
-
-        logger.info("JSON report formatting finished.")
-
-        # --- Save Reports ---
-        reports_dir = "scan_reports"
-        os.makedirs(reports_dir, exist_ok=True)
-        
-        # Helper for filename sanitation, now includes a timestamp
-        def get_safe_filename_prefix_with_timestamp(url_str):
-            # Sanitize URL part
-            name = url_str.replace("http://", "").replace("https://", "") # Remove protocol
-            name = name.replace("/", "_") # Replace slashes
-            name = "".join(c if c.isalnum() or c in ['.', '_', '-'] else '_' for c in name) # Keep dots, underscores, hyphens
-            name = name.strip('_.') # Clean leading/trailing unwanted chars
-            if not name: # Handle empty name after sanitization (e.g. if URL was just "http://")
-                name = "default_target"
-            
-            # Add timestamp
-            timestamp_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            return f"{name}_{timestamp_str}"
-
-        safe_filename_base = get_safe_filename_prefix_with_timestamp(target_url)
-
-        # 1. Save the main JSON report (from JSON Formatter Agent)
-        main_json_report_path = None
-        try:
-            final_json_dict = json.loads(final_json_str) # The formatter agent should output a valid JSON string
-            main_json_report_filename = f"report_{safe_filename_base}_vulnerability.json"
-            main_json_report_path = os.path.join(reports_dir, main_json_report_filename)
-            with open(main_json_report_path, 'w', encoding='utf-8') as f:
-                json.dump(final_json_dict, f, indent=4, ensure_ascii=False)
-            logger.info(f"Main JSON report saved to: {main_json_report_path}")
-        except json.JSONDecodeError:
-            logger.error(f"JSON Report Formatter Agent did not return a valid JSON string. Raw output: {final_json_str[:500]}...") # Log snippet
-            # Save the raw invalid output for debugging
-            main_json_report_filename = f"report_{safe_filename_base}_vulnerability_INVALID.json"
-            main_json_report_path = os.path.join(reports_dir, main_json_report_filename)
-            with open(main_json_report_path, 'w', encoding='utf-8') as f:
-                f.write(final_json_str)
-            logger.info(f"Saved raw (invalid) JSON output to: {main_json_report_path}")
-            # final_json_dict remains None or an error dict if needed later
-
-        # 2. Save the Markdown report (from Security Analyst Agent's output)
-        md_report_filename = f"report_{safe_filename_base}_vulnerability.md"
-        md_report_path = os.path.join(reports_dir, md_report_filename)
-        
-        # The analyst_report_content is the direct output from the security analyst.
-        # If it's not already in good markdown, format_vulnerability_report should make it so.
-        # The format_vulnerability_report function might need adjustment if its output isn't Markdown.
-        # For now, we assume analyst_report_content is either Markdown or format_vulnerability_report handles it.
-        
-        markdown_content_to_save = analyst_report_content
-        # Optional: Pass through format_vulnerability_report if analyst_report_content is not guaranteed to be good markdown.
-        # Example: if not str(analyst_report_content).strip().startswith("#"): # Simple check for string content
-        #    markdown_content_to_save = format_vulnerability_report(analyst_report_content)
-
-        with open(md_report_path, 'w', encoding='utf-8') as f:
-            f.write(str(markdown_content_to_save)) # Ensure it's a string
-        logger.info(f"Markdown report saved to: {md_report_path}")
-        
-        status_message = f"Scan completed. Main JSON: {main_json_report_path}, Markdown: {md_report_path}"
-        
-        log_scan_end(current_scan_id, "Completed", 
-                     report_json_path=main_json_report_path, 
-                     report_md_path=md_report_path)
-        
-        return status_message, main_json_report_path, md_report_path
-
     except Exception as e:
-        error_message = f"Error during scan for {target_url}: {str(e)}"
-        logger.error(error_message, exc_info=True)
-        # Log error to database
-        if current_scan_id:
-            log_scan_end(current_scan_id, "Error") # Only pass scan_id and status on error
-        return error_message, None, None
+        llm_init_error = f"Error during LLM initialization (Provider: {chosen_llm_provider}): {str(e)}\\n{traceback.format_exc()}"
+        logger.error(llm_init_error)
+        return llm_init_error, None, None
+        
+    os.environ["TARGET_URL"] = target_url
+    
+    crawler_tools = [web_crawler, javascript_analyzer]
+    scanner_tools = [scan_xss, scan_sqli, scan_open_redirect, scan_csrf, scan_path_traversal]
+    info_gatherer_tools = [http_header_fetcher, ssl_tls_analyzer, cms_detector, port_scanner, security_headers_analyzer]
+    security_analyst_tools = [analyze_vulnerability_severity, owasp_risk_score]
+    
+    crawler_agent = create_crawler_agent(tools=crawler_tools, llm=llm, memory=False)
+    scanner_agent = create_endpoint_scanner_agent(tools=scanner_tools, llm=llm, memory=False)
+    info_gatherer_agent = create_information_gatherer_agent(tools=info_gatherer_tools, llm=llm, memory=False)
+    security_analyst_agent = create_security_analyst_agent(tools=security_analyst_tools, llm=llm, memory=False)
+    
+    info_gathering_tasks_defs = [
+        ("Analyze HTTP headers for security configuration on {target_url}. Use http_header_fetcher tool to retrieve and analyze HTTP response headers. Look for missing security headers and server information disclosure.",
+         "A detailed analysis of HTTP headers with security recommendations"),
+        ("Analyze SSL/TLS configuration on {target_url}. Use ssl_tls_analyzer tool to check for outdated protocols, weak ciphers, and certificate issues.",
+         "A report on SSL/TLS security status with identified weaknesses"),
+        ("Detect CMS and technologies used by {target_url}. Use cms_detector tool to identify content management systems, frameworks, and server technologies.",
+         "A list of detected technologies and potential version information")
+    ]
+
+    # Tạo crawling task với các tham số mới
+    crawling_task_instance = website_crawling_task(
+        agent=crawler_agent,
+        target_url=target_url,
+        max_depth=crawl_max_depth,
+        max_pages=crawl_max_pages
+    )
+
+    tasks = []
+    if scan_type == "basic":
+        logger.info("Performing basic scan (basic information and common vulnerabilities)...")
+        tasks = [
+            crawling_task_instance, # Sử dụng instance đã tạo
+            Task(description=info_gathering_tasks_defs[0][0].format(target_url=target_url), expected_output=info_gathering_tasks_defs[0][1], agent=info_gatherer_agent),
+            Task(description=xss_scanning_task(scanner_agent).description.format(target_url=target_url), expected_output=xss_scanning_task(scanner_agent).expected_output, agent=scanner_agent, context_aware=True),
+            Task(description=sql_injection_scanning_task(scanner_agent).description.format(target_url=target_url), expected_output=sql_injection_scanning_task(scanner_agent).expected_output, agent=scanner_agent, context_aware=True),
+            Task(description=f"""Create a comprehensive security report for {target_url}. 
+Your report MUST start with a dedicated section titled 'Discovered Web Structure' that meticulously lists ALL discovered endpoints, forms (with their HTTP methods and input fields), and any URL parameters identified during the website crawling phase. This section should be based on the output from the 'Website Crawling Specialist' agent. 
+After this detailed web structure section, consolidate and detail all vulnerability findings from other scanning tasks. 
+Finally, provide an overall risk assessment and strategic recommendations.""", 
+                 expected_output="""A comprehensive security report that begins with a detailed 'Discovered Web Structure' section (listing all endpoints, forms, parameters from crawling), followed by consolidated vulnerability findings, risk assessment, and recommendations.""", 
+                 agent=security_analyst_agent, context_aware=True, async_execution=False)
+        ]
+    else: # full scan
+        logger.info("Performing full scan (all vulnerabilities)...")
+        api_discovery_task_instance = api_endpoint_discovery_task(agent=crawler_agent) 
+        dynamic_analysis_task_instance = dynamic_content_analysis_task(agent=crawler_agent)
+        categorization_task_instance = endpoint_categorization_task(agent=crawler_agent)
+        
+        tasks = [
+            crawling_task_instance, 
+            api_discovery_task_instance,
+            dynamic_analysis_task_instance,
+            categorization_task_instance,
+            Task(description=info_gathering_tasks_defs[0][0].format(target_url=target_url), expected_output=info_gathering_tasks_defs[0][1], agent=info_gatherer_agent, context_aware=True),
+            Task(description=info_gathering_tasks_defs[1][0].format(target_url=target_url), expected_output=info_gathering_tasks_defs[1][1], agent=info_gatherer_agent, context_aware=True),
+            Task(description=info_gathering_tasks_defs[2][0].format(target_url=target_url), expected_output=info_gathering_tasks_defs[2][1], agent=info_gatherer_agent, context_aware=True),
+            Task(description=f"Scan open ports on {target_url}. Use port_scanner tool.", expected_output="List of open ports and services.", agent=info_gatherer_agent, context_aware=True),
+            Task(description=f"Analyze security headers on {target_url}. Use security_headers_analyzer tool.", expected_output="Detailed analysis of security headers.", agent=info_gatherer_agent, context_aware=True),
+            Task(description=xss_scanning_task(scanner_agent).description.format(target_url=target_url), expected_output=xss_scanning_task(scanner_agent).expected_output, agent=scanner_agent, context_aware=True),
+            Task(description=sql_injection_scanning_task(scanner_agent).description.format(target_url=target_url), expected_output=sql_injection_scanning_task(scanner_agent).expected_output, agent=scanner_agent, context_aware=True),
+            Task(description=open_redirect_scanning_task(scanner_agent).description.format(target_url=target_url), expected_output=open_redirect_scanning_task(scanner_agent).expected_output, agent=scanner_agent, context_aware=True),
+            Task(description=csrf_scanning_task(scanner_agent).description.format(target_url=target_url), expected_output=csrf_scanning_task(scanner_agent).expected_output, agent=scanner_agent, context_aware=True),
+            Task(description=path_traversal_scanning_task(scanner_agent).description.format(target_url=target_url), expected_output=path_traversal_scanning_task(scanner_agent).expected_output, agent=scanner_agent, context_aware=True),
+            Task(description=f"""Create an exhaustive and comprehensive security report for {target_url}. 
+Your report MUST begin with a dedicated and detailed section titled 'Discovered Web Structure and API Endpoints'. This section must meticulously list ALL discovered website pages, endpoints (including API endpoints), forms (with their HTTP methods and input fields), JavaScript-based interaction points, and any URL parameters identified during the website crawling and API discovery phases. This data should be sourced directly from the outputs of the 'Website Crawling Specialist' and 'API Endpoint Discoverer' agents. 
+Following this comprehensive web structure and API inventory, consolidate, analyze, and detail ALL vulnerability findings from every preceding scanning and analysis task. 
+Conclude with an in-depth overall risk assessment, prioritized remediation steps, and strategic security improvement recommendations.""", 
+                 expected_output="""An exhaustive security report starting with a detailed 'Discovered Web Structure and API Endpoints' section (listing all pages, endpoints, forms, JS interactions, parameters from crawling/API discovery), followed by consolidated vulnerability analysis, risk assessment, and strategic recommendations.""", 
+                 agent=security_analyst_agent, context_aware=True, async_execution=False)
+        ]
+    
+    logger.info("\nNote: The scanning process may take several minutes to hours, depending on the target website and scan type.")
+    
+    vulnerability_scanner_crew = Crew(
+        agents=[crawler_agent, scanner_agent, info_gatherer_agent, security_analyst_agent],
+        tasks=tasks,
+        process=Process.sequential,
+        verbose=True,
+        memory=False,
+    )
+    
+    logger.info("\nStarting vulnerability scan crew...")
+    
+    # Simplified inputs for kickoff
+    crew_inputs = {'target_url': target_url}
+    analyst_raw_output = vulnerability_scanner_crew.kickoff(inputs=crew_inputs)
+    
+    analyst_report_content = ""
+    if isinstance(analyst_raw_output, str):
+        analyst_report_content = analyst_raw_output
+    elif hasattr(analyst_raw_output, 'raw_output') and analyst_raw_output.raw_output: # Check TaskOutput
+         analyst_report_content = analyst_raw_output.raw_output
+    elif hasattr(analyst_raw_output, 'result') and analyst_raw_output.result:
+         analyst_report_content = analyst_raw_output.result
+    elif hasattr(analyst_raw_output, 'raw') and analyst_raw_output.raw: # Older CrewAI versions
+        analyst_report_content = analyst_raw_output.raw
+    elif isinstance(analyst_raw_output, dict) and 'final_output' in analyst_raw_output: # Crew output dict
+        analyst_report_content = analyst_raw_output['final_output']
+    else:
+        analyst_report_content = str(analyst_raw_output) # Fallback
+
+    logger.info("Vulnerability scan crew finished. Preparing reports.")
+    save_interim_results("final_analyst_summary", "security_analyst", analyst_report_content, target_url)
+
+    # --- Create and run JSON Formatting Crew ---
+    logger.info("Starting JSON report formatting...")
+    json_formatter_agent = create_json_report_formatter_agent(llm=llm)
+    
+    # Ensure analyst_report_content is a string for the formatting task description
+    analyst_report_content_str_for_task = analyst_report_content
+    if not isinstance(analyst_report_content_str_for_task, str):
+        try:
+            analyst_report_content_str_for_task = json.dumps(analyst_report_content_str_for_task, indent=2)
+        except TypeError: # Handle non-serializable objects if any by converting to string
+             analyst_report_content_str_for_task = str(analyst_report_content_str_for_task)
+
+
+    json_formatting_task_instance = create_json_report_formatting_task(
+        agent=json_formatter_agent,
+        original_report_content=analyst_report_content_str_for_task
+    )
+
+    json_formatting_crew = Crew(
+        agents=[json_formatter_agent],
+        tasks=[json_formatting_task_instance],
+        verbose=True, # Set to False if too noisy for this step
+        memory=False
+    )
+    
+    formatter_crew_output = json_formatting_crew.kickoff()
+    
+    final_json_str = ""
+    if isinstance(formatter_crew_output, str):
+        final_json_str = formatter_crew_output
+    elif hasattr(formatter_crew_output, 'raw_output') and formatter_crew_output.raw_output:
+         final_json_str = formatter_crew_output.raw_output
+    elif hasattr(formatter_crew_output, 'result') and formatter_crew_output.result:
+         final_json_str = formatter_crew_output.result
+    elif hasattr(formatter_crew_output, 'raw') and formatter_crew_output.raw: # Older CrewAI versions
+        final_json_str = formatter_crew_output.raw
+    elif isinstance(formatter_crew_output, dict) and 'final_output' in formatter_crew_output:
+        final_json_str = formatter_crew_output['final_output']
+    else:
+        final_json_str = str(formatter_crew_output) # Fallback
+
+    logger.info("JSON report formatting finished.")
+
+    # --- Save Reports ---
+    reports_dir = "scan_reports"
+    os.makedirs(reports_dir, exist_ok=True)
+    
+    # Helper for filename sanitation, now includes a timestamp
+    def get_safe_filename_prefix_with_timestamp(url_str):
+        # Sanitize URL part
+        name = url_str.replace("http://", "").replace("https://", "") # Remove protocol
+        name = name.replace("/", "_") # Replace slashes
+        name = "".join(c if c.isalnum() or c in ['.', '_', '-'] else '_' for c in name) # Keep dots, underscores, hyphens
+        name = name.strip('_.') # Clean leading/trailing unwanted chars
+        if not name: # Handle empty name after sanitization (e.g. if URL was just "http://")
+            name = "default_target"
+        
+        # Add timestamp
+        timestamp_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        return f"{name}_{timestamp_str}"
+
+    safe_filename_base = get_safe_filename_prefix_with_timestamp(target_url)
+
+    # 1. Save the main JSON report (from JSON Formatter Agent)
+    main_json_report_path = None
+    try:
+        final_json_dict = json.loads(final_json_str) # The formatter agent should output a valid JSON string
+        main_json_report_filename = f"report_{safe_filename_base}_vulnerability.json"
+        main_json_report_path = os.path.join(reports_dir, main_json_report_filename)
+        with open(main_json_report_path, 'w', encoding='utf-8') as f:
+            json.dump(final_json_dict, f, indent=4, ensure_ascii=False)
+        logger.info(f"Main JSON report saved to: {main_json_report_path}")
+    except json.JSONDecodeError:
+        logger.error(f"JSON Report Formatter Agent did not return a valid JSON string. Raw output: {final_json_str[:500]}...") # Log snippet
+        # Save the raw invalid output for debugging
+        main_json_report_filename = f"report_{safe_filename_base}_vulnerability_INVALID.json"
+        main_json_report_path = os.path.join(reports_dir, main_json_report_filename)
+        with open(main_json_report_path, 'w', encoding='utf-8') as f:
+            f.write(final_json_str)
+        logger.info(f"Saved raw (invalid) JSON output to: {main_json_report_path}")
+        # final_json_dict remains None or an error dict if needed later
+
+    # 2. Save the Markdown report (from Security Analyst Agent's output)
+    md_report_filename = f"report_{safe_filename_base}_vulnerability.md"
+    md_report_path = os.path.join(reports_dir, md_report_filename)
+    
+    # The analyst_report_content is the direct output from the security analyst.
+    # If it's not already in good markdown, format_vulnerability_report should make it so.
+    # The format_vulnerability_report function might need adjustment if its output isn't Markdown.
+    # For now, we assume analyst_report_content is either Markdown or format_vulnerability_report handles it.
+    
+    markdown_content_to_save = analyst_report_content
+    # Optional: Pass through format_vulnerability_report if analyst_report_content is not guaranteed to be good markdown.
+    # Example: if not str(analyst_report_content).strip().startswith("#"): # Simple check for string content
+    #    markdown_content_to_save = format_vulnerability_report(analyst_report_content)
+
+    with open(md_report_path, 'w', encoding='utf-8') as f:
+        f.write(str(markdown_content_to_save)) # Ensure it's a string
+    logger.info(f"Markdown report saved to: {md_report_path}")
+    
+    status_message = f"Scan completed. Main JSON: {main_json_report_path}, Markdown: {md_report_path}"
+    
+    log_scan_end(current_scan_id, "Completed" if report_json_path else "Failed", 
+                 report_json_path=main_json_report_path, 
+                 report_md_path=md_report_path)
+    
+    return status_message, main_json_report_path, md_report_path
 
 def format_vulnerability_report(report_content):
     """
@@ -824,61 +839,69 @@ def format_vulnerability_report(report_content):
         return str(report_content)
 
 def main():
+    # Ngay sau dòng def main():
+    print(f"DEBUG: Loaded APP_SETTINGS: {APP_SETTINGS}")
+    if APP_SETTINGS: # Kiểm tra xem APP_SETTINGS có phải là dict rỗng không
+        print(f"DEBUG: OpenAI API Key from settings: '{APP_SETTINGS.get('OPENAI_API_KEY')}'")
+        print(f"DEBUG: DeepSeek API Key from settings: '{APP_SETTINGS.get('DEEPSEEK_API_KEY')}'")
+    else:
+        print("DEBUG: APP_SETTINGS is empty, likely due to JSONDecodeError or file creation issue.")
+
     # Configure argument parser
-    parser = argparse.ArgumentParser(description='Web Vulnerability Scanner')
-    parser.add_argument('-u', '--url', type=str, help='Target URL to scan')
-    parser.add_argument('-o', '--openai', action='store_true', help='Use OpenAI instead of DeepSeek')
-    parser.add_argument('-f', '--full', action='store_true', help='Perform a full scan (all vulnerability types)')
+    parser = argparse.ArgumentParser(description='Vulnerability Scanner using CrewAI')
+    parser.add_argument("-u", "--url", help="Target URL to scan (e.g., https://example.com)")
+    parser.add_argument("--deepseek", action="store_true", help="Explicitly use DeepSeek LLM.")
+    parser.add_argument("--openai", action="store_true", help="Explicitly use OpenAI LLM.")
+    parser.add_argument("--scan-type", type=str, default="basic", choices=["basic", "full"], help="Type of scan to perform (basic or full)")
+    parser.add_argument('--max-depth', type=int, default=2, help='Maximum crawl depth (default: 2).')
+    parser.add_argument('--max-pages', type=int, default=100, help='Maximum number of pages to crawl (default: 100).')
     args = parser.parse_args()
     
-    # Khởi tạo DB
+    if not args.url:
+        parser.print_help()
+        sys.exit("Error: Target URL is required. Please provide a URL to scan.")
+
+    target_url = args.url
+    scan_type = args.scan_type
+    crawl_max_depth_from_args = args.max_depth
+    crawl_max_pages_from_args = args.max_pages
+
+    # Initialize database
     init_db()
     
-    # Determine which LLM to use
-    use_deepseek = not args.openai  # Default is True (use DeepSeek) if no -o option
-    
-    # Determine scan type
-    scan_type = "full" if args.full else "basic"
-    
-    # If URL not provided via parameter, prompt for input
-    target_url = None
-    if args.url:
-        target_url = args.url
-    else:
-        target_url = input("Enter target URL: ")
-    
-    # Check if URL is provided
-    if not target_url or target_url.strip() == "":
-        print("\nError: URL not provided. Please enter a URL to scan.")
-        return 1
-    
-    # Bắt đầu ghi log quét
+    # Log scan start
     scan_id = log_scan_start(target_url, scan_type)
     
-    # Run scan
-    results, json_report_path, txt_report_path = scan_website(target_url, use_deepseek, scan_type, current_scan_id=scan_id)
-    
-    # Cập nhật log quét khi hoàn thành hoặc lỗi
-    # Việc cập nhật web_json_report_path đã được xử lý bên trong scan_website nếu thành công
-    # Ở đây chúng ta chỉ cần cập nhật status chính nếu chưa có web_json_report_path
-    if not json_report_path:
-        scan_status = "Completed"
-        if isinstance(results, str) and ("Error:" in results or "Unidentified error:" in results) or not json_report_path:
-            scan_status = "Error"
-        log_scan_end(scan_id, scan_status, json_report_path, None) # web_json_path là None nếu không được tạo
+    logger.info(f"Starting scan for {target_url} with scan_type='{scan_type}', max_depth={crawl_max_depth_from_args}, max_pages={crawl_max_pages_from_args}. LLM selection will follow preference/availability.")
 
-    # Display results
-    print("\n==== SECURITY VULNERABILITY ASSESSMENT REPORT ====\n")
-    
-    # Check if the results are already well-formatted
-    if isinstance(results, str) and "# Comprehensive Vulnerability Assessment Report" in results:
-        print(results)
-    else:
-        # Format results for clearer display
-        formatted_results = format_vulnerability_report(results)
-        print(formatted_results)
-    
-    return 0
+    original_stdout = sys.stdout
+    original_stderr = sys.stderr
+
+    try:
+        scan_status_message, report_json_file, report_md_file = scan_website(
+            target_url=target_url, 
+            scan_type=scan_type, 
+            current_scan_id=scan_id,
+            crawl_max_depth=crawl_max_depth_from_args,
+            crawl_max_pages=crawl_max_pages_from_args,
+            cli_args=args
+        )
+        
+        logger.info(f"Scan status: {scan_status_message}")
+        if report_json_file:
+            logger.info(f"JSON report saved to: {report_json_file}")
+        if report_md_file:
+            logger.info(f"Markdown report saved to: {report_md_file}")
+
+        log_scan_end(scan_id, "Completed" if report_json_file else "Failed", report_json_file, report_md_file)
+
+    except Exception as e:
+        logger.error(f"An error occurred during the scan for {target_url}: {traceback.format_exc()}")
+        log_scan_end(scan_id, "Error")
+        print(f"SCAN ERROR: {e}", file=original_stderr)
+    finally:
+        sys.stdout = original_stdout
+        sys.stderr = original_stderr
 
 # Function to save/load interim results
 def save_interim_results(task_name, agent_name, data, target_url):
@@ -995,7 +1018,6 @@ def load_all_previous_results(task_names, agent_names, target_url):
     return results
 
 if __name__ == "__main__":
-    # Đảm bảo init_db được gọi nếu script chạy trực tiếp và main() không được gọi từ nơi khác
     if not os.path.exists(DB_NAME):
         init_db()
     main() 
