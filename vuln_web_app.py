@@ -9,13 +9,14 @@ import sqlite3
 from datetime import datetime
 from flask import Flask, render_template, request, jsonify, redirect, url_for, Response, stream_with_context
 import re
+from werkzeug.utils import safe_join
 
 # Thiết lập logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler("web_app.log"),
+        logging.FileHandler("web_app.log", encoding='utf-8'),
         logging.StreamHandler(sys.stdout)
     ]
 )
@@ -46,6 +47,16 @@ except ImportError as e:
 app = Flask(__name__, 
             static_folder='web/static',
             template_folder='web/templates')
+
+# Define a single source of truth for the scan reports directory
+# Default to 'scan_reports' if not set via environment or other config mechanism later
+app.config.setdefault('SCAN_REPORTS_DIR', 'scan_reports')
+
+# Ensure the directory exists (optional, but good practice)
+try:
+    os.makedirs(app.config['SCAN_REPORTS_DIR'], exist_ok=True)
+except OSError as e:
+    logger.error(f"Could not create SCAN_REPORTS_DIR '{app.config['SCAN_REPORTS_DIR']}': {e}")
 
 # Queue và biến toàn cục để lưu output stream
 output_queue = queue.Queue()
@@ -88,13 +99,19 @@ def get_scan_history_from_db():
                     item['duration'] = round(scan_duration, 2)
                 except Exception as e:
                     logger.error(f"Error calculating scan duration for history item {item.get('id')}: {str(e)}")
-                    item['duration'] = 0
+                    item['duration'] = 0 # Or 'N/A' or None
             else:
-                item['duration'] = 0
+                item['duration'] = 0 # Or 'N/A' or None
             
-            if item.get('report_json_path') and os.path.exists(item['report_json_path']):
+            # Ensure report paths are basenames and stripped
+            if item.get('report_json_path'):
+                item['report_json_path'] = os.path.basename(item['report_json_path']).strip()
+            if item.get('report_md_path'):
+                item['report_md_path'] = os.path.basename(item['report_md_path']).strip()
+
+            if item.get('report_json_path') and item['report_json_path'] != '' and os.path.exists(safe_join(app.config['SCAN_REPORTS_DIR'], item['report_json_path'])):
                 try:
-                    with open(item['report_json_path'], 'r', encoding='utf-8') as f:
+                    with open(safe_join(app.config['SCAN_REPORTS_DIR'], item['report_json_path']), 'r', encoding='utf-8') as f:
                         report_data = json.load(f)
                         if 'summary' in report_data and 'total_vulnerabilities' in report_data['summary']:
                             item['vulnerabilities'] = report_data['summary']['total_vulnerabilities']
@@ -130,6 +147,13 @@ def get_scan_details_from_db(scan_id):
         
         if row:
             scan_details = dict(row)
+            
+            # Ensure report paths are basenames and stripped before returning
+            if scan_details.get('report_json_path'):
+                scan_details['report_json_path'] = os.path.basename(scan_details['report_json_path']).strip()
+            if scan_details.get('report_md_path'):
+                scan_details['report_md_path'] = os.path.basename(scan_details['report_md_path']).strip()
+
             if scan_details.get('scan_timestamp') and scan_details.get('end_time'):
                 try:
                     start_time = datetime.strptime(scan_details['scan_timestamp'], "%Y-%m-%d %H:%M:%S")
@@ -321,23 +345,62 @@ class ThreadedScan:
 class OutputCapture(object):
     def __init__(self, scan):
         self.scan = scan
-        self.buffer = ""
+        self.buffer = "" # Not currently used
 
     def write(self, text):
-        # Đẩy output vào queue để stream tới client nếu cần
-        output_queue.put(text)
-        # Lưu lại output cho scan cụ thể này
+        if not isinstance(text, str):
+            text = str(text) # Đảm bảo text luôn là string
+
+        # Lưu trữ output gốc (có thể chứa emoji) cho client
         if self.scan:
             self.scan.output_capture.append(text)
-        # Ghi vào log file của web app
-        # sys.__stdout__.write(text) # Tránh vòng lặp vô hạn nếu logger cũng ghi ra stdout
-        logger.debug(f"Captured output: {text.strip()}") # Ghi vào log dưới dạng debug
+            
+            # Logic cập nhật progress dựa trên keywords
+            current_progress = self.scan.progress
+            new_progress = current_progress
+            
+            if "Target URL:" in text and current_progress < 5:
+                new_progress = 5
+            elif "Web Crawler" in text and current_progress < 10:
+                new_progress = 10
+            elif "Crawling " in text and current_progress < 15:
+                new_progress = 15
+            elif "Analyzing HTTP headers" in text and current_progress < 25:
+                new_progress = 25
+            elif "Discovering endpoints" in text and current_progress < 40:
+                new_progress = 40
+            elif "Analyzing JavaScript" in text and current_progress < 50:
+                new_progress = 50
+            elif "Scanning for XSS" in text and current_progress < 60:
+                new_progress = 60
+            elif "Scanning for SQL" in text and current_progress < 70:
+                new_progress = 70
+            elif "Scanning for" in text and "vulnerabilities" in text and current_progress < 75:
+                new_progress = 75
+            elif ("Creating comprehensive summary" in text or "Create a comprehensive summary" in text) and current_progress < 80:
+                new_progress = 80
+            elif "formatting" in text.lower() and "report" in text.lower() and current_progress < 85:
+                new_progress = 85
+            elif ("Generating report" in text or "Creating report" in text) and current_progress < 90:
+                new_progress = 90
+            elif "Agent:" in text and current_progress < 95:
+                potential_progress = current_progress + 2 
+                new_progress = min(potential_progress, 95)
+
+            if new_progress > current_progress:
+                self.scan.progress = new_progress
+                # Làm sạch text fragment trước khi ghi log server để tránh UnicodeEncodeError
+                safe_fragment = text.strip()[:60].encode('ascii', 'replace').decode('ascii')
+                logger.info(f"Scan {self.scan.scan_id} progress updated to {self.scan.progress}% based on output. Fragment: \"{safe_fragment}...\"")
+        
+        # Làm sạch text cho debug log của server
+        safe_debug_text = text.strip().encode('ascii', 'replace').decode('ascii')
+        logger.debug(f"Captured for scan {self.scan.scan_id if self.scan else 'N/A'}: {safe_debug_text}")
 
     def flush(self):
-        # sys.__stdout__.flush()
-        pass # Flask xử lý flush
+        pass
 
-    def isatty(self): # Cần cho một số thư viện
+    def isatty(self):
         return False
 
 # Routes
@@ -498,76 +561,107 @@ def get_scan_history_api(): # Đổi tên API route để tránh trùng với h�
 
 @app.route('/api/reports')
 def list_reports():
-    reports_dir = "scan_reports"
-    if not os.path.exists(reports_dir):
-        return jsonify([])
-    
-    report_files = []
-    for filename in os.listdir(reports_dir):
-        if filename.startswith("report_") and (filename.endswith(".json") or filename.endswith(".md")):
-            file_path = os.path.join(reports_dir, filename)
-            try:
-                stat = os.stat(file_path)
-                # Trích xuất thông tin từ tên file nếu có thể (ví dụ: target, timestamp)
-                # report_example_pentest_corp_20231026_103045_vulnerability.json
-                parts = filename.replace("report_", "").replace("_vulnerability.json", "").replace("_vulnerability.md", "").split("_")
-                target_guess = "N/A"
-                timestamp_str = "N/A"
-                if len(parts) > 1: # Giả sử ít nhất có target và timestamp
-                    timestamp_str = parts[-2] + "_" + parts[-1] if len(parts) >=2 else parts[-1]
-                    target_guess = "_".join(parts[:-2]) if len(parts) > 2 else parts[0]
+    """Trả về danh sách các file báo cáo đã được tạo."""
+    reports_dir = app.config['SCAN_REPORTS_DIR']
+    try:
+        if not os.path.isdir(reports_dir):
+            logger.warning(f"Reports directory not found: {reports_dir}")
+            return jsonify({"error": "Reports directory not found"}), 404
+        
+        report_files = []
+        for f_name in os.listdir(reports_dir):
+            if os.path.isfile(os.path.join(reports_dir, f_name)) and \
+               (f_name.endswith('_vulnerability.json') or f_name.endswith('_vulnerability.md')):
+                try:
+                    # Lấy thông tin cơ bản từ tên file nếu có thể
+                    # report_testphp.vulnweb.com_20240726_103000_vulnerability.json
+                    parts = f_name.replace('_vulnerability.json', '').replace('_vulnerability.md', '').split('_')
+                    target = parts[0].replace('report_','') if len(parts) > 0 else f_name
+                    date_str = parts[1] if len(parts) > 1 else None
+                    time_str = parts[2] if len(parts) > 2 else None
+                    timestamp_display = "Unknown"
+                    if date_str and time_str:
+                        try:
+                            dt_obj = datetime.strptime(f"{date_str}{time_str}", "%Y%m%d%H%M%S")
+                            timestamp_display = dt_obj.strftime("%Y-%m-%d %H:%M:%S")
+                        except ValueError:
+                            timestamp_display = f"{date_str} {time_str}" # Fallback
+                    
+                    report_files.append({
+                        "filename": f_name, # Chỉ tên file
+                        "path": f_name, # Legacy, giữ lại để client cũ không bị lỗi ngay, nhưng client mới nên dùng filename
+                        "type": "json" if f_name.endswith(".json") else "markdown",
+                        "size": os.path.getsize(os.path.join(reports_dir, f_name)),
+                        "modified_time": os.path.getmtime(os.path.join(reports_dir, f_name)),
+                        "target_guessed": target,
+                        "timestamp_display_guessed": timestamp_display
+                    })
+                except Exception as e:
+                    logger.error(f"Error processing report file {f_name} in list_reports: {e}")
+                    # Add with minimal info if parsing fails
+                    report_files.append({
+                        "filename": f_name,
+                        "path": f_name,
+                        "type": "json" if f_name.endswith(".json") else "markdown",
+                        "error": "Could not parse metadata from filename"
+                    })
 
-                report_files.append({
-                    "filename": filename,
-                    "path": file_path,
-                    "size": stat.st_size,
-                    "modified_time": datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S'),
-                    "type": "JSON" if filename.endswith(".json") else "Markdown",
-                    "target_guess": target_guess,
-                    "timestamp_str": timestamp_str
-                })
-            except Exception as e:
-                logger.error(f"Error processing report file {filename}: {e}")
-                report_files.append({
-                    "filename": filename,
-                    "error": str(e)
-                })
-    
-    # Sắp xếp theo thời gian sửa đổi, mới nhất lên đầu
-    report_files.sort(key=lambda x: x.get("modified_time", ""), reverse=True)
-    return jsonify(report_files)
+        # Sắp xếp theo thời gian sửa đổi, mới nhất lên đầu
+        report_files.sort(key=lambda x: x.get('modified_time', 0), reverse=True)
+        return jsonify(report_files)
+    except Exception as e:
+        logger.error(f"Error listing reports: {e}")
+        return jsonify({"error": "Failed to list reports"}), 500
 
 @app.route('/api/report/<path:filename>')
 def get_report(filename):
-    # filename ở đây bao gồm cả thư mục con nếu có, nhưng hiện tại là không
-    # Chúng ta cần đảm bảo filename an toàn, không cho phép path traversal
-    reports_dir = os.path.abspath("scan_reports")
-    requested_path = os.path.abspath(os.path.join(reports_dir, filename))
+    """Trả về nội dung của một file báo cáo cụ thể."""
+    configured_reports_dir_name = app.config['SCAN_REPORTS_DIR']
+    reports_dir_abs_path = os.path.abspath(configured_reports_dir_name)
+    logger.info(f"API /api/report: app.config['SCAN_REPORTS_DIR'] = '{configured_reports_dir_name}', Absolute path = '{reports_dir_abs_path}'")
 
-    if not requested_path.startswith(reports_dir):
-        return jsonify({"error": "Access denied"}), 403 # Path traversal attempt
+    # filename ở đây client nên gửi basename, nhưng chúng ta vẫn xử lý basename và strip để an toàn
+    actual_filename_basename = os.path.basename(filename).strip()
+    
+    # Kiểm tra nếu sau khi strip, basename trở thành rỗng (ví dụ filename chỉ là dấu cách)
+    if not actual_filename_basename:
+        logger.warning(f"API /api/report: Received filename '{filename}' resulted in empty basename after strip.")
+        return jsonify({"error": "Invalid report filename (empty after strip)"}), 400
 
-    if not os.path.exists(requested_path) or not os.path.isfile(requested_path):
-        return jsonify({"error": "Report not found"}), 404
+    requested_path = safe_join(reports_dir_abs_path, actual_filename_basename)
 
+    logger.info(f"API /api/report: Requested filename='{filename}', basename='{actual_filename_basename}', final path='{requested_path}'")
+
+    if not os.path.abspath(requested_path).startswith(os.path.abspath(reports_dir_abs_path)):
+        logger.warning(f"Path traversal attempt denied for /api/report: {filename}")
+        return jsonify({"error": "Access denied - invalid path"}), 403
+
+    if not os.path.exists(requested_path):
+        logger.warning(f"Report file not found for /api/report: {requested_path}")
+        return jsonify({"error": "Report file not found"}), 404
+    
     try:
-        # Sử dụng safe_open_file nếu cần xử lý encoding phức tạp
-        with open(requested_path, 'r', encoding='utf-8') as f: # Mặc định utf-8 cho report
+        with open(requested_path, 'r', encoding='utf-8') as f:
             content = f.read()
         
-        if filename.endswith(".json"):
-            return jsonify(json.loads(content)) # Parse lại JSON để đảm bảo nó valid
-        elif filename.endswith(".md"):
-            return Response(content, mimetype='text/markdown') # Hoặc text/plain
+        if actual_filename_basename.endswith('.json'):
+            try:
+                # Validate JSON before sending to ensure it's well-formed
+                json_data = json.loads(content)
+                return jsonify(json_data) # Send as JSON response
+            except json.JSONDecodeError as je:
+                logger.error(f"JSONDecodeError for {actual_filename_basename}: {je}")
+                return jsonify({"error": "Report file is not valid JSON", "details": str(je)}), 500
+        elif actual_filename_basename.endswith('.md'):
+            # For Markdown, send as plain text, client will render
+            return Response(content, mimetype='text/markdown; charset=utf-8')
         else:
-            return Response(content, mimetype='text/plain')
+            # For other types, treat as plain text
+            return Response(content, mimetype='text/plain; charset=utf-8')
             
-    except json.JSONDecodeError as e:
-        logger.error(f"JSONDecodeError for report {filename}: {e}")
-        return jsonify({"error": "Report is not valid JSON", "details": str(e)}), 500
     except Exception as e:
-        logger.error(f"Error reading report {filename}: {e}")
-        return jsonify({"error": "Could not read report file", "details": str(e)}), 500
+        logger.error(f"Error reading report file {requested_path}: {e}", exc_info=True)
+        return jsonify({"error": f"Could not read report file: {str(e)}"}), 500
 
 
 @app.route('/api/history/<int:scan_id>', methods=['DELETE'])
@@ -640,17 +734,18 @@ def delete_report(filename):
         return jsonify({"error": "Failed to delete report file", "details": str(e)}), 500
 
 
-@app.route('/report/<path:filename>')
-def view_report(filename):
-    # Đây là trang HTML để hiển thị report, không phải API trả về JSON/Markdown thô
-    # Nó sẽ gọi /api/report/<filename> để lấy nội dung
-    # Cần kiểm tra loại file để render template phù hợp
-    file_type = "json" if filename.endswith(".json") else "markdown" if filename.endswith(".md") else "unknown"
-    return render_template('view_report.html', 
-                           title=f"View Report: {filename}", 
-                           report_filename=filename,
-                           report_api_url=url_for('get_report', filename=filename),
-                           file_type=file_type)
+@app.route('/report/<path:filename_from_url>')
+def view_report(filename_from_url):
+    app.logger.info(f"Accessing /report/ route for path: {filename_from_url}")
+    filename_from_url = filename_from_url.strip()
+    if not filename_from_url:
+        app.logger.error("Filename from URL is empty after stripping when trying to render report page.")
+        return render_template("404.html", error_message=f"Invalid report path: filename is empty."), 400
+
+    # report.html sẽ tự lấy filename từ window.location.pathname thông qua JS.
+    app.logger.info(f"Rendering template: 'report.html' for URL path '{filename_from_url}'")
+    
+    return render_template('report.html')
 
 
 def check_db_status_internal():
@@ -753,12 +848,12 @@ def save_llm_settings():
 def page_not_found(e):
     return render_template('404.html', title="Page Not Found"), 404
 
-# @app.route('/api/db/scan/<int:db_id>') # Route này có vẻ không cần thiết nữa nếu dashboard dùng scan_history
-# def get_scan_by_db_id(db_id):
-#     scan = get_scan_details_from_db(db_id)
-#     if scan:
-#         return jsonify(scan)
-#     return jsonify({"error": "Scan not found"}), 404
+@app.route('/api/db/scan/<int:db_id>')
+def get_scan_by_db_id(db_id):
+    scan = get_scan_details_from_db(db_id)
+    if scan:
+        return jsonify(scan)
+    return jsonify({"error": "Scan not found"}), 404
 
 if __name__ == '__main__':
     # Khởi tạo DB nếu chưa có khi web app chạy trực tiếp

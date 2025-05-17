@@ -17,45 +17,55 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     // Toggle dark/light mode
-    darkModeToggle.addEventListener('click', function() {
-        const currentTheme = htmlElement.getAttribute('data-theme');
-        const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-        
-        htmlElement.setAttribute('data-theme', newTheme);
-        localStorage.setItem('theme', newTheme);
-        updateDarkModeIcon(newTheme === 'dark');
-    });
+    if (darkModeToggle) { // Check if darkModeToggle exists
+        darkModeToggle.addEventListener('click', function() {
+            const currentTheme = htmlElement.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            
+            htmlElement.setAttribute('data-theme', newTheme);
+            localStorage.setItem('theme', newTheme);
+            updateDarkModeIcon(newTheme === 'dark');
+        });
+    }
     
     function updateDarkModeIcon(isDark) {
-        if (isDark) {
-            darkModeToggle.innerHTML = '<i class="bi bi-sun"></i>';
-        } else {
-            darkModeToggle.innerHTML = '<i class="bi bi-moon"></i>';
+        if (darkModeToggle) { // Check if darkModeToggle exists
+            darkModeToggle.innerHTML = isDark ? '<i class="bi bi-sun"></i>' : '<i class="bi bi-moon"></i>';
         }
     }
     
     // Initialize charts if they exist
-    initializeCharts();
+    if (typeof initializeCharts === 'function') {
+        initializeCharts();
+    }
     
-    // Initialize scan form if it exists
-    initializeScanForm();
+    // Scan form initialization is now handled by the inline script in scan.html
+    // initializeScanForm(); 
     
     // Load dashboard data if on dashboard page
-    if (document.querySelector('.dashboard-container')) {
+    if (document.querySelector('.dashboard-container') && typeof loadDashboardData === 'function') {
         loadDashboardData();
     }
     
     // Load history data if on history page
-    if (document.querySelector('.history-container')) {
+    if (document.querySelector('.history-container') && typeof loadHistoryData === 'function') {
         loadHistoryData();
+    }
+
+    const llmSettingsForm = document.getElementById('llmSettingsForm');
+    if (llmSettingsForm && typeof saveLLMSettings === 'function') {
+        llmSettingsForm.addEventListener('submit', function(event) {
+            event.preventDefault();
+            saveLLMSettings();
+        });
     }
 });
 
-// Initialize Charts
+// Initialize Charts (Keep this function if used on other pages like dashboard)
 function initializeCharts() {
     // Weekly chart
     const weeklyChartEl = document.getElementById('weeklyChart');
-    if (weeklyChartEl) {
+    if (weeklyChartEl && typeof Chart !== 'undefined') { // Check for Chart library
         const weeklyCtx = weeklyChartEl.getContext('2d');
         new Chart(weeklyCtx, {
             type: 'line',
@@ -90,6 +100,7 @@ function initializeCharts() {
             },
             options: {
                 responsive: true,
+                maintainAspectRatio: false,
                 plugins: {
                     legend: {
                         position: 'top',
@@ -108,9 +119,9 @@ function initializeCharts() {
         });
     }
     
-    // Monthly chart
+    // Monthly chart (similar checks)
     const monthlyChartEl = document.getElementById('monthlyChart');
-    if (monthlyChartEl) {
+    if (monthlyChartEl && typeof Chart !== 'undefined') {
         const monthlyCtx = monthlyChartEl.getContext('2d');
         new Chart(monthlyCtx, {
             type: 'line',
@@ -145,6 +156,7 @@ function initializeCharts() {
             },
             options: {
                 responsive: true,
+                maintainAspectRatio: false,
                 plugins: {
                     legend: {
                         position: 'top',
@@ -165,6 +177,8 @@ function initializeCharts() {
 }
 
 // Scan functionality
+// REMOVE/COMMENT OUT initializeScanForm and startScan as they are now handled by scan.html's inline script
+/*
 function initializeScanForm() {
     const scanForm = document.getElementById('scanForm');
     if (!scanForm) return;
@@ -205,477 +219,674 @@ function startScan(formData) {
         }
         
         const scanId = data.scan_id;
-        const eventSource = new EventSource('/api/stream');
+        // The /api/stream endpoint for EventSource was generic. 
+        // A scan-specific stream or relying on polling output might be more robust.
+        // For now, keeping the old logic if server supports it, but it's a point of potential issue.
+        const eventSource = new EventSource('/api/stream'); 
         
-        // Listen for scan updates
         eventSource.addEventListener('message', function(e) {
-            const data = JSON.parse(e.data);
-            
-            // If this message is for our scan
-            if (data.scan_id === scanId) {
-                appendToConsole(data.text);
+            const eventData = JSON.parse(e.data); // Renamed to avoid conflict
+            if (eventData.scan_id === scanId && eventData.text) {
+                appendToConsole(eventData.text);
             }
         });
         
-        // Poll for scan status
         pollScanStatus(scanId, eventSource);
     })
     .catch(error => {
         showScanError('An error occurred: ' + error.message);
     });
 }
+*/
 
-function pollScanStatus(scanId, eventSource) {
+// Global function called by scan.html's inline script after successful scan initiation
+window.initiateScanMonitoring = function(scanId) {
+    console.log(`[main.js] initiateScanMonitoring called for scan ID: ${scanId}`);
+    const consoleOutputEl = document.getElementById('consoleOutput');
+    if (consoleOutputEl) {
+        consoleOutputEl.innerHTML = ''; // Explicitly clear console first
+    }
+    currentScanLog = null; // Reset cached log to null for a fresh start
+    if (statusPollTimeoutId) clearTimeout(statusPollTimeoutId); 
+
+    appendToConsole(`>>> Scan monitoring active via main.js for ID: ${scanId}. Polling status...`);
+    pollScanStatus(scanId); 
+};
+
+let currentScanLog = null; // Initialize to null; stores RAW log text to detect any byte change
+let statusPollTimeoutId = null; // To store timeout for general status polling
+
+function pollScanStatus(scanId) {
+    if (statusPollTimeoutId) clearTimeout(statusPollTimeoutId); // Clear previous timeout
+
     const statusUrl = `/api/scan/${scanId}`;
-    
+    console.log(`[main.js] Polling status for ${scanId} from ${statusUrl}`);
+
     fetch(statusUrl)
-        .then(response => response.json())
+        .then(response => {
+            if (!response.ok) {
+                return response.json().then(errData => {
+                    throw new Error(errData.error || `Status poll HTTP ${response.status}`);
+                }).catch(() => { throw new Error(`Status poll HTTP ${response.status}`); });
+            }
+            return response.json();
+        })
         .then(data => {
+            console.log(`[main.js] Received status for ${scanId}:`, JSON.stringify(data));
+            if (data.error) {
+                showScanError(data.error);
+                updateUIAfterScanEnd(false, scanId, data.result || data.error);
+                appendToConsole(`[main.js] Scan ${scanId} error from status: ${data.error}`);
+                return;
+            }
+
             updateScanProgress(data.progress);
-            
-            if (data.status === 'completed') {
-                // Scan completed
-                eventSource.close();
+            fetchAndDisplayLogs(scanId); // Call log fetching
+
+            if (data.status === 'completed' || data.status === 'Completed') {
+                console.log(`[main.js] Scan ${scanId} reported as completed.`);
+                updateScanProgress(100);
                 fetchScanResults(scanId);
-            } else if (data.status === 'error') {
-                // Scan error
-                eventSource.close();
-                showScanError('An error occurred during the scan');
-            } else {
-                // Poll again after 2 seconds
-                setTimeout(() => pollScanStatus(scanId, eventSource), 2000);
+                updateUIAfterScanEnd(true, scanId, data.report_file || data.report_json_path || data.report_md_path);
+            } else if (data.status === 'failed' || data.status === 'Error') {
+                console.log(`[main.js] Scan ${scanId} reported as failed/error. Message: ${data.result}`);
+                showScanError(data.result || 'Scan failed or encountered an error.');
+                updateUIAfterScanEnd(false, scanId, data.result || 'Scan failed');
+                appendToConsole(`Scan status: ${data.status}. Error: ${data.result || 'Unknown scan error'}`);
+            } else { // Still running or pending
+                console.log(`[main.js] Scan ${scanId} is ${data.status}. Scheduling next poll.`);
+                statusPollTimeoutId = setTimeout(() => pollScanStatus(scanId), 3000); // Poll every 3 seconds
             }
         })
         .catch(error => {
-            eventSource.close();
-            showScanError('Error checking scan status: ' + error.message);
+            console.error(`[main.js] Error polling scan status for ${scanId}:`, error);
+            showScanError('Error polling scan status: ' + error.message);
+            updateUIAfterScanEnd(false, scanId, 'Polling error');
+            appendToConsole(`[SYSTEM ERROR] Problem polling status: ${error.message}`);
+        });
+}
+
+function fetchAndDisplayLogs(scanId) {
+    console.log(`[main.js] fetchAndDisplayLogs called for scan ID: ${scanId}.`);
+    fetch(`/api/scan/${scanId}/output?_=${new Date().getTime()}`) // Cache-busting
+        .then(logResponse => {
+            if (!logResponse.ok) {
+                const errorMsgBase = `Log fetch HTTP ${logResponse.status} for scan ${scanId}`;
+                console.error(`[main.js] ${errorMsgBase}`, logResponse);
+                return logResponse.text().then(text => {
+                    throw new Error(`${errorMsgBase}: ${text || 'Server error details unavailable'}`);
+                });
+            }
+            return logResponse.text(); 
+        })
+        .then(logText => { 
+            console.log(`[main.js] Received raw logText for ${scanId}. Length: ${logText.length}. Preview: "${logText.substring(0, 100).replace(/\n/g, '\\n')}"`);
+            const consoleOutputEl = document.getElementById('consoleOutput');
+            if (!consoleOutputEl) {
+                console.error("[main.js] consoleOutputEl not found! Cannot display logs.");
+                return;
+            }
+
+            if (logText !== currentScanLog) {
+                console.log("[main.js] Raw logText has changed, attempting to update UI console.");
+                consoleOutputEl.innerHTML = ''; // Clear previous content
+                
+                // Diagnostic line to see if this block is reached and console is cleared
+                // appendToConsole("---LOG UPDATE CYCLE START---"); 
+
+                const trimmedLogForDisplay = logText.trim(); 
+                if (trimmedLogForDisplay) { 
+                    trimmedLogForDisplay.split('\n').forEach(line => appendToConsole(line));
+                } else {
+                    // If the new log (after trim) is empty, console remains cleared.
+                    // appendToConsole("[No displayable log content from server]"); // Optional placeholder
+                }
+                currentScanLog = logText; // Update cache with the new RAW logText
+            } else {
+                console.log("[main.js] No change in raw logText based on cache, UI console not updated.");
+            }
+        }).catch(logError => {
+            console.error("[main.js] Error fetching or processing scan output:", logError);
+            const consoleOutputEl = document.getElementById('consoleOutput');
+            if (consoleOutputEl) {
+                // Avoid clearing and re-adding if there's an error, just append the error.
+                appendToConsole(`[SYSTEM ERROR] Problem fetching/processing logs: ${logError.message}`);
+            }
         });
 }
 
 function fetchScanResults(scanId) {
-    fetch(`/api/scan/${scanId}/result`)
-        .then(response => response.json())
-        .then(data => {
-            // Update UI with scan results
-            document.getElementById('scanProgressText').textContent = 'Scan Complete';
-            
-            if (data.report_file) {
-                const viewReportBtn = document.getElementById('viewReportBtn');
-                viewReportBtn.href = `/report/${data.report_file}`;
-                viewReportBtn.style.display = 'inline-block';
+    const resultUrl = `/api/scan/${scanId}/result`; // Endpoint should provide final structured result
+    appendToConsole(`Fetching final results from: ${resultUrl}`);
+    fetch(resultUrl)
+        .then(response => {
+            if (!response.ok) {
+                return response.json().then(errData => {
+                    throw new Error(errData.error || `Fetch results: Server returned ${response.status}`);
+                }).catch(() => {
+                     throw new Error(`Fetch results: Server returned ${response.status}`);
+                });
             }
-            
-            // Display vulnerability results
-            displayVulnerabilities(data.result);
+            // Check content type for JSON or Markdown
+            const contentType = response.headers.get("content-type");
+            if (contentType && contentType.indexOf("application/json") !== -1) {
+                return response.json();
+            } else {
+                return response.text().then(text => ({_isMarkdown: true, content: text})); // Wrap markdown for identification
+            }
+        })
+        .then(data => {
+            if (data.error) {
+                showScanError(data.error);
+                appendToConsole(`Error fetching results: ${data.error}`);
+                return;
+            }
+            // Assuming displayVulnerabilities expects a specific JSON structure
+            // If data is markdown, handle differently or adapt displayVulnerabilities
+            if (data._isMarkdown) {
+                appendToConsole("Received Markdown report. Displaying raw content in results area for now.");
+                const vulnResultsEl = document.getElementById('vulnerabilityResults');
+                if (vulnResultsEl) {
+                    const mdCard = `
+                        <div class="card">
+                            <div class="card-header">Markdown Report</div>
+                            <div class="card-body">
+                                <pre style="white-space: pre-wrap; word-break: break-all;">${escapeHtml(data.content)}</pre>
+                            </div>
+                        </div>`;
+                    vulnResultsEl.innerHTML = mdCard;
+                }
+            } else {
+                 appendToConsole("Processing JSON results for display...");
+                 displayVulnerabilities(data); // This function needs to exist and handle the JSON
+            }
         })
         .catch(error => {
             showScanError('Error fetching scan results: ' + error.message);
+            appendToConsole(`Error fetching results: ${error.message}`);
+            console.error("Error in fetchScanResults:", error);
         });
 }
 
+function escapeHtml(unsafe) {
+    if (unsafe === null || typeof unsafe === 'undefined') {
+        return ''; // Explicitly handle null or undefined
+    }
+    // Convert to string if it's not already a string (e.g., numbers, booleans)
+    if (typeof unsafe !== 'string') {
+        unsafe = String(unsafe);
+    }
+    return unsafe
+         .replace(/&/g, "&amp;")
+         .replace(/</g, "&lt;")
+         .replace(/>/g, "&gt;")
+         .replace(/"/g, "&quot;")
+         .replace(/'/g, "&#039;");
+}
+
+
 function updateScanProgress(progress) {
-    document.getElementById('scanProgress').style.width = `${progress}%`;
-    document.getElementById('scanProgressText').textContent = `${progress}%`;
+    const progressEl = document.getElementById('scanProgress');
+    const progressTextEl = document.getElementById('scanProgressText');
+    if (progressEl && progressTextEl) {
+        console.log(`[main.js] updateScanProgress - Received raw progress: "${progress}", type: ${typeof progress}`);
+        const p = Math.max(0, Math.min(100, parseInt(progress) || 0)); // Ensure 0-100
+        console.log(`[main.js] updateScanProgress - Parsed progress to: ${p}`);
+        
+        progressEl.style.width = p + '%';
+        progressTextEl.textContent = p + '%';
+        
+        if (p < 100) {
+            progressEl.classList.add('progress-bar-animated');
+            progressEl.classList.remove('bg-success', 'bg-danger'); // Actively remove final state colors
+        } else { // p === 100 (or clamped to 100)
+            progressEl.classList.remove('progress-bar-animated');
+            // The final color (bg-success or bg-danger) will be set by updateUIAfterScanEnd.
+            // No need to add bg-success here as it might conflict if scan reaches 100% then fails.
+        }
+    } else {
+        console.error("[main.js] updateScanProgress - Progress bar elements (scanProgress or scanProgressText) not found.");
+    }
 }
 
 function appendToConsole(text) {
-    const consoleOutput = document.getElementById('consoleOutput');
-    if (!consoleOutput) return;
-    
-    // Parse ANSI escape codes using the ansiParser
-    const formattedText = window.ansiParser ? window.ansiParser.parse(text) : text;
-    
-    const line = document.createElement('div');
-    line.className = 'console-line';
-    line.innerHTML = formattedText;
-    consoleOutput.appendChild(line);
-    
-    // Auto-scroll to bottom
-    consoleOutput.scrollTop = consoleOutput.scrollHeight;
+    const consoleOutputEl = document.getElementById('consoleOutput');
+    if (consoleOutputEl && text != null) { // Check if text is not null or undefined
+        let sanitizedText = String(text); 
+        // Basic ANSI code removal
+        sanitizedText = sanitizedText.replace(/\u001b\[\d+(;\d+)*m/g, ''); 
+        sanitizedText = sanitizedText.replace(/\u001b\[\d*[a-zA-Z]/g, '');  
+
+        const lineEl = document.createElement('div');
+        lineEl.className = 'console-line';
+        if (sanitizedText.toLowerCase().includes('agent:') || sanitizedText.toLowerCase().includes('task output:')) {
+            lineEl.classList.add('agent-line');
+        }
+        // Use textContent for security, and trim the individual line
+        lineEl.textContent = sanitizedText.trim(); 
+        
+        // Only append if the trimmed line is not empty, to avoid lots of blank lines
+        if (lineEl.textContent) { 
+            consoleOutputEl.appendChild(lineEl);
+            consoleOutputEl.scrollTop = consoleOutputEl.scrollHeight;
+        }
+    }
 }
 
 function showScanError(errorMessage) {
-    document.getElementById('scanError').textContent = errorMessage;
-    document.getElementById('scanError').style.display = 'block';
-    document.getElementById('scanFormContainer').style.display = 'block';
-    document.getElementById('scanResults').style.display = 'none';
+    const errorEl = document.getElementById('scanError'); // Error display on scan page
+    if (errorEl) {
+        errorEl.textContent = errorMessage;
+        errorEl.style.display = 'block';
+    }
+    // Also log to browser console for debugging
+    console.error("Scan Error:", errorMessage);
+    // Optionally update a general status area if one exists outside the scan form
 }
 
-function displayVulnerabilities(vulnerabilities) {
+// displayVulnerabilities function - this is a complex part and depends heavily on the JSON structure
+// The version from main_old.js might need adjustments based on actual report JSON.
+// This is a simplified placeholder or should be the one from main_old.js
+function displayVulnerabilities(data) {
     const resultsContainer = document.getElementById('vulnerabilityResults');
-    resultsContainer.innerHTML = '';
-    
-    if (!vulnerabilities || Object.keys(vulnerabilities).length === 0) {
-        resultsContainer.innerHTML = '<div class="alert alert-success">No vulnerabilities found!</div>';
+    if (!resultsContainer) return;
+
+    resultsContainer.innerHTML = ''; // Clear previous results
+
+    let vulnerabilities = [];
+    if (data && data.vulnerabilities && Array.isArray(data.vulnerabilities)) {
+        vulnerabilities = data.vulnerabilities;
+    } else if (data && data.findings && Array.isArray(data.findings)) { // Alternative structure
+        vulnerabilities = data.findings;
+    } else if (data && Array.isArray(data)) { // If the data itself is an array of vulnerabilities
+        vulnerabilities = data;
+    }
+
+
+    if (vulnerabilities.length === 0 && !(data.summary && data.summary.total_vulnerabilities > 0) ) {
+         if (data.summary && data.summary.message) {
+             resultsContainer.innerHTML = `<div class="alert alert-info">${escapeHtml(data.summary.message)}</div>`;
+         } else if (data.message) {
+             resultsContainer.innerHTML = `<div class="alert alert-info">${escapeHtml(data.message)}</div>`;
+         }
+         else {
+            resultsContainer.innerHTML = '<div class="alert alert-success">No vulnerabilities detected in the structured report data.</div>';
+         }
         return;
     }
     
-    // Create summary card
-    const summaryCard = document.createElement('div');
-    summaryCard.className = 'card mb-4';
-    summaryCard.innerHTML = `
-        <div class="card-header">
-            <h5 class="card-title">Vulnerability Summary</h5>
-        </div>
-        <div class="card-body">
-            <div class="row">
-                <div class="col-md-3">
-                    <div class="stat-card">
-                        <div class="stat-icon" style="background-color: rgba(231, 76, 60, 0.1);">
-                            <i class="bi bi-exclamation-triangle" style="color: #e74c3c;"></i>
-                        </div>
-                        <div class="stat-details">
-                            <p class="stat-title">High Risk</p>
-                            <h3 class="stat-value" id="highRiskCount">0</h3>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-3">
-                    <div class="stat-card">
-                        <div class="stat-icon" style="background-color: rgba(243, 156, 18, 0.1);">
-                            <i class="bi bi-exclamation-circle" style="color: #f39c12;"></i>
-                        </div>
-                        <div class="stat-details">
-                            <p class="stat-title">Medium Risk</p>
-                            <h3 class="stat-value" id="mediumRiskCount">0</h3>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-3">
-                    <div class="stat-card">
-                        <div class="stat-icon" style="background-color: rgba(46, 204, 113, 0.1);">
-                            <i class="bi bi-info-circle" style="color: #2ecc71;"></i>
-                        </div>
-                        <div class="stat-details">
-                            <p class="stat-title">Low Risk</p>
-                            <h3 class="stat-value" id="lowRiskCount">0</h3>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-3">
-                    <div class="stat-card">
-                        <div class="stat-icon" style="background-color: rgba(52, 152, 219, 0.1);">
-                            <i class="bi bi-info" style="color: #3498db;"></i>
-                        </div>
-                        <div class="stat-details">
-                            <p class="stat-title">Information</p>
-                            <h3 class="stat-value" id="infoCount">0</h3>
-                        </div>
+    const summary = data.summary || {}; // Use summary if available
+    let summaryHtml = '<div class="card mb-3"><div class="card-body">';
+    summaryHtml += `<h5 class="card-title">Scan Summary</h5>`;
+    if(summary.target_url) summaryHtml += `<p class="card-text"><strong>Target:</strong> ${escapeHtml(summary.target_url)}</p>`;
+    if(summary.total_vulnerabilities !== undefined) summaryHtml += `<p class="card-text"><strong>Total Vulnerabilities:</strong> ${summary.total_vulnerabilities}</p>`;
+    if(summary.critical_count !== undefined) summaryHtml += `<p class="card-text text-danger"><strong>Critical:</strong> ${summary.critical_count}</p>`;
+    if(summary.high_count !== undefined) summaryHtml += `<p class="card-text text-warning"><strong>High:</strong> ${summary.high_count}</p>`; // Common color for high
+    if(summary.medium_count !== undefined) summaryHtml += `<p class="card-text text-info"><strong>Medium:</strong> ${summary.medium_count}</p>`; // Common color for medium
+    if(summary.low_count !== undefined) summaryHtml += `<p class="card-text"><strong>Low:</strong> ${summary.low_count}</p>`;
+     if(summary.message) summaryHtml += `<p class="mt-2"><em>${escapeHtml(summary.message)}</em></p>`;
+    summaryHtml += '</div></div>';
+    resultsContainer.innerHTML += summaryHtml;
+
+
+    const accordionId = 'vulnerabilitiesAccordion';
+    let accordionHtml = `<div class="accordion" id="${accordionId}">`;
+
+    vulnerabilities.forEach((vuln, index) => {
+        const itemId = `vuln-item-${index}`;
+        const collapseId = `vuln-collapse-${index}`;
+        const severity = vuln.severity || 'Unknown';
+        const severityClass = getSeverityClass(severity); // Helper for class
+
+        accordionHtml += `
+            <div class="accordion-item">
+                <h2 class="accordion-header" id="heading-${itemId}">
+                    <button class="accordion-button collapsed ${severityClass}" type="button" data-bs-toggle="collapse" data-bs-target="#${collapseId}" aria-expanded="false" aria-controls="${collapseId}">
+                        <strong>${escapeHtml(vuln.name || vuln.type || 'Vulnerability')}</strong> - <span class="badge bg-secondary ms-2">${escapeHtml(severity)}</span>
+                         ${vuln.location ? `<small class="ms-auto text-muted pe-2" style="font-size: 0.8em;">${escapeHtml(truncate(vuln.location, 50))}</small>` : ''}
+                    </button>
+                </h2>
+                <div id="${collapseId}" class="accordion-collapse collapse" aria-labelledby="heading-${itemId}" data-bs-parent="#${accordionId}">
+                    <div class="accordion-body">
+                        <p><strong>Description:</strong> ${escapeHtml(vuln.description || 'N/A')}</p>
+                        ${vuln.location ? `<p><strong>Location:</strong> <code style="word-break:break-all;">${escapeHtml(vuln.location)}</code></p>` : ''}
+                        ${vuln.parameter ? `<p><strong>Parameter:</strong> <code>${escapeHtml(vuln.parameter)}</code></p>` : ''}
+                        ${vuln.cvss_score ? `<p><strong>CVSS Score:</strong> ${escapeHtml(vuln.cvss_score)}</p>` : ''}
+                        ${vuln.cve_id ? `<p><strong>CVE ID:</strong> ${escapeHtml(vuln.cve_id)}</p>` : ''}
+                        ${vuln.impact ? `<p><strong>Impact:</strong> ${escapeHtml(vuln.impact)}</p>` : ''}
+                        ${vuln.remediation || vuln.recommendation ? `<p><strong>Remediation:</strong> ${escapeHtml(vuln.remediation || vuln.recommendation)}</p>` : ''}
+                        ${vuln.payload ? `<p><strong>Payload:</strong> <pre style="white-space: pre-wrap; word-break: break-all; background-color: #f0f0f0; padding: 5px; border-radius: 3px;"><code>${escapeHtml(vuln.payload)}</code></pre></p>` : ''}
+                        ${vuln.references && vuln.references.length > 0 ? 
+                            '<p><strong>References:</strong><ul>' + vuln.references.map(ref => `<li><a href="${escapeHtml(ref)}" target="_blank" rel="noopener noreferrer">${escapeHtml(ref)}</a></li>`).join('') + '</ul></p>' 
+                            : ''
+                        }
                     </div>
                 </div>
             </div>
-        </div>
-    `;
-    resultsContainer.appendChild(summaryCard);
-    
-    // Add vulnerability list
-    const vulnerabilityList = document.createElement('div');
-    vulnerabilityList.className = 'vulnerability-list';
-    
-    // Count vulnerabilities by severity
-    let highCount = 0, mediumCount = 0, lowCount = 0, infoCount = 0;
-    
-    // Display each vulnerability
-    for (const category in vulnerabilities) {
-        if (category === 'summary' || category === 'metadata') continue;
-        
-        const categoryIssues = vulnerabilities[category];
-        if (!Array.isArray(categoryIssues) || categoryIssues.length === 0) continue;
-        
-        // Add category header
-        const categoryHeader = document.createElement('h4');
-        categoryHeader.className = 'mt-4 mb-3';
-        categoryHeader.textContent = formatCategoryName(category);
-        vulnerabilityList.appendChild(categoryHeader);
-        
-        // Add each vulnerability in the category
-        categoryIssues.forEach(vuln => {
-            // Count by severity
-            if (vuln.severity === 'high') highCount++;
-            else if (vuln.severity === 'medium') mediumCount++;
-            else if (vuln.severity === 'low') lowCount++;
-            else infoCount++;
-            
-            const vulnItem = document.createElement('div');
-            vulnItem.className = 'vulnerability-item';
-            
-            // Create severity badge
-            const severityClass = getSeverityClass(vuln.severity);
-            const severityBadge = `<span class="badge ${severityClass}">${vuln.severity.toUpperCase()}</span>`;
-            
-            vulnItem.innerHTML = `
-                <div class="vulnerability-header">
-                    <h5 class="vulnerability-title">${vuln.name || 'Unnamed Vulnerability'}</h5>
-                    ${severityBadge}
-                </div>
-                <p class="vulnerability-description">${vuln.description || 'No description provided'}</p>
-                ${vuln.details ? `<div class="vulnerability-details">${formatDetails(vuln.details)}</div>` : ''}
-                ${vuln.remediation ? `
-                    <div class="mt-3">
-                        <h6>Remediation:</h6>
-                        <p>${vuln.remediation}</p>
-                    </div>
-                ` : ''}
-            `;
-            
-            vulnerabilityList.appendChild(vulnItem);
-        });
-    }
-    
-    resultsContainer.appendChild(vulnerabilityList);
-    
-    // Update summary counts
-    document.getElementById('highRiskCount').textContent = highCount;
-    document.getElementById('mediumRiskCount').textContent = mediumCount;
-    document.getElementById('lowRiskCount').textContent = lowCount;
-    document.getElementById('infoCount').textContent = infoCount;
-}
-
-function formatCategoryName(category) {
-    return category
-        .split('_')
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' ');
+        `;
+    });
+    accordionHtml += '</div>';
+    resultsContainer.innerHTML += accordionHtml;
+     appendToConsole(`Displayed ${vulnerabilities.length} vulnerabilities.`);
 }
 
 function getSeverityClass(severity) {
-    switch (severity.toLowerCase()) {
-        case 'high': return 'risk-high';
-        case 'medium': return 'risk-medium';
-        case 'low': return 'risk-low';
-        default: return 'risk-info';
-    }
+    severity = String(severity).toLowerCase();
+    if (severity === 'critical') return 'text-danger fw-bold'; // Bootstrap 5 text colors
+    if (severity === 'high') return 'text-warning';    // More standard high color
+    if (severity === 'medium') return 'text-info';
+    if (severity === 'low') return 'text-muted';
+    return '';
 }
 
-function formatDetails(details) {
-    // If details is a string, return it with line breaks converted to <br>
-    if (typeof details === 'string') {
-        return details.replace(/\n/g, '<br>');
-    }
-    
-    // If details is an object, format as JSON
-    return `<pre>${JSON.stringify(details, null, 2)}</pre>`;
+function truncate(str, maxLength) {
+    if (typeof str !== 'string') return '';
+    if (str.length <= maxLength) return str;
+    return str.substring(0, maxLength) + '...';
 }
 
-// Load dashboard data
+
+// --- Dashboard and History specific functions ---
+// These should remain as they are, assuming they are called from their respective pages
+// and their corresponding HTML elements exist on those pages.
+
 function loadDashboardData() {
-    // Fetch scan history
-    fetch('/api/history')
+    fetch('/api/history?limit=5&status=Completed') // Example: fetch recent completed scans
         .then(response => response.json())
         .then(data => {
-            updateDashboardStats(data);
-            updateRecentScans(data);
-        })
-        .catch(error => {
-            console.error('Error loading dashboard data:', error);
-        });
-        
-    // Fetch report data
-    fetch('/api/reports')
+            updateRecentScans(data.scans || data); // Adapt based on actual API response structure
+        }).catch(error => console.error('Error loading recent scans for dashboard:', error));
+
+    fetch('/api/stats/vulnerability_distribution') // Example endpoint for stats
         .then(response => response.json())
         .then(data => {
-            updateTopVulnerabilities(data);
-        })
-        .catch(error => {
-            console.error('Error loading report data:', error);
-        });
+            updateDashboardStats(data); // This function needs to be created or adapted
+        }).catch(error => console.error('Error loading vulnerability distribution for dashboard:', error));
+    
+    fetch('/api/stats/top_vulnerabilities') // Example endpoint for top vulnerabilities
+        .then(response => response.json())
+        .then(data => {
+           updateTopVulnerabilities(data); // This function needs to be created or adapted
+        }).catch(error => console.error('Error loading top vulnerabilities for dashboard:', error));
 }
 
 function updateDashboardStats(data) {
-    if (!data || !Array.isArray(data)) return;
-    
-    // Total scans
-    const totalScans = data.length;
-    const totalScansElement = document.getElementById('total-scans');
-    if (totalScansElement) totalScansElement.textContent = totalScans;
-    
-    // Calculate average scan time
-    let totalScanTime = 0;
-    let validScans = 0;
-    
-    data.forEach(scan => {
-        if (scan.duration && scan.duration !== 'N/A') {
-            const durationParts = scan.duration.split(':');
-            const minutes = parseInt(durationParts[0]) * 60 + parseInt(durationParts[1]);
-            totalScanTime += minutes;
-            validScans++;
-        }
-    });
-    
-    const avgScanTime = validScans > 0 ? Math.round(totalScanTime / validScans) : 0;
-    const avgScanTimeElement = document.getElementById('avg-scan-time');
-    if (avgScanTimeElement) {
-        avgScanTimeElement.textContent = `${Math.floor(avgScanTime / 60)}:${(avgScanTime % 60).toString().padStart(2, '0')}`;
+    // This function needs to populate charts or stats display on the dashboard
+    // For example, if you have a chart for vulnerability distribution:
+    const distributionChartEl = document.getElementById('vulnerabilityDistributionChart'); // Assume this ID exists
+    if (distributionChartEl && data && typeof Chart !== 'undefined') {
+        const ctx = distributionChartEl.getContext('2d');
+        new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: data.labels || ['Critical', 'High', 'Medium', 'Low', 'Informational'],
+                datasets: [{
+                    label: 'Vulnerability Distribution',
+                    data: data.counts || [0,0,0,0,0], // from data.critical, data.high etc.
+                    backgroundColor: [
+                        'rgba(217, 83, 79, 0.7)', // Critical (red)
+                        'rgba(240, 173, 78, 0.7)', // High (orange)
+                        'rgba(91, 192, 222, 0.7)', // Medium (blue)
+                        'rgba(92, 184, 92, 0.7)',  // Low (green)
+                        'rgba(173, 216, 230, 0.7)' // Informational (light blue)
+                    ],
+                    borderColor: [
+                        'rgba(217, 83, 79, 1)',
+                        'rgba(240, 173, 78, 1)',
+                        'rgba(91, 192, 222, 1)',
+                        'rgba(92, 184, 92, 1)',
+                        'rgba(173, 216, 230, 1)'
+                    ],
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top',
+                    },
+                    title: {
+                        display: true,
+                        text: 'Overall Vulnerability Distribution'
+                    }
+                }
+            }
+        });
     }
+     console.log("Dashboard stats updated (placeholder):", data);
 }
 
-function updateRecentScans(data) {
-    if (!data || !Array.isArray(data)) return;
-    
-    const recentScansContainer = document.getElementById('recent-scans-list');
-    if (!recentScansContainer) return;
-    
-    // Clear loading indicator
-    recentScansContainer.innerHTML = '';
-    
-    // Get 5 most recent scans
-    const recentScans = data.slice(0, 5);
-    
-    if (recentScans.length === 0) {
-        recentScansContainer.innerHTML = '<p class="text-center text-muted">No scans yet</p>';
+function updateRecentScans(scans) {
+    const recentScansTableBody = document.querySelector('#recentScansTable tbody'); // Assuming this ID exists
+    if (!recentScansTableBody) return;
+
+    recentScansTableBody.innerHTML = ''; // Clear old data
+    if (!scans || scans.length === 0) {
+        recentScansTableBody.innerHTML = '<tr><td colspan="5" class="text-center">No recent scans found.</td></tr>';
         return;
     }
-    
-    recentScans.forEach(scan => {
-        const scanItem = document.createElement('div');
-        scanItem.className = 'recent-scan-item p-2 border-bottom';
-        
-        scanItem.innerHTML = `
-            <div class="d-flex justify-content-between align-items-center">
-                <div>
-                    <h6 class="mb-1 text-truncate" style="max-width: 200px;">${scan.url}</h6>
-                    <p class="small text-muted mb-0">${scan.time}</p>
-                </div>
-                <a href="/report/${scan.report_file}" class="btn btn-sm btn-outline-primary">View</a>
-            </div>
-        `;
-        
-        recentScansContainer.appendChild(scanItem);
-    });
-}
 
-function updateTopVulnerabilities(data) {
-    if (!data || !Array.isArray(data)) return;
-    
-    const tableBody = document.querySelector('#top-vulnerabilities-table tbody');
-    if (!tableBody) return;
-    
-    // Clear loading indicator
-    tableBody.innerHTML = '';
-    
-    // Extract all vulnerabilities from all reports
-    const allVulnerabilities = [];
-    data.forEach(report => {
-        if (report.file && report.file.endsWith('.json')) {
-            fetch(`/api/report/${report.file}`)
-                .then(response => response.json())
-                .then(reportData => {
-                    // Process the report data to extract vulnerabilities
-                    for (const category in reportData) {
-                        if (category === 'summary' || category === 'metadata') continue;
-                        
-                        const categoryIssues = reportData[category];
-                        if (Array.isArray(categoryIssues)) {
-                            categoryIssues.forEach(vuln => {
-                                allVulnerabilities.push({
-                                    type: vuln.name || category,
-                                    severity: vuln.severity || 'info'
-                                });
-                            });
-                        }
-                    }
-                    
-                    // Now count vulnerabilities by type
-                    const vulnCounts = {};
-                    allVulnerabilities.forEach(vuln => {
-                        if (!vulnCounts[vuln.type]) {
-                            vulnCounts[vuln.type] = {
-                                count: 0,
-                                severity: vuln.severity
-                            };
-                        }
-                        vulnCounts[vuln.type].count++;
-                    });
-                    
-                    // Convert to array and sort by count
-                    const vulnArray = Object.entries(vulnCounts)
-                        .map(([type, data]) => ({
-                            type,
-                            count: data.count,
-                            severity: data.severity
-                        }))
-                        .sort((a, b) => b.count - a.count)
-                        .slice(0, 5);
-                    
-                    // Update table
-                    if (vulnArray.length === 0) {
-                        tableBody.innerHTML = '<tr><td colspan="3" class="text-center">No vulnerabilities found</td></tr>';
-                        return;
-                    }
-                    
-                    tableBody.innerHTML = vulnArray.map(vuln => `
-                        <tr>
-                            <td>${vuln.type}</td>
-                            <td>${vuln.count}</td>
-                            <td><span class="badge ${getSeverityClass(vuln.severity)}">${vuln.severity.toUpperCase()}</span></td>
-                        </tr>
-                    `).join('');
-                })
-                .catch(error => {
-                    console.error('Error loading report:', error);
-                });
+    scans.slice(0, 5).forEach(scan => { // Display top 5
+        const row = recentScansTableBody.insertRow();
+        row.insertCell().textContent = scan.id;
+        const targetCell = row.insertCell();
+        targetCell.innerHTML = `<a href="${escapeHtml(scan.target_url)}" target="_blank">${escapeHtml(truncate(scan.target_url, 40))}</a>`;
+        row.insertCell().textContent = new Date(scan.scan_timestamp || scan.timestamp).toLocaleString();
+        row.insertCell().innerHTML = `<span class="badge bg-${scan.status === 'Completed' ? 'success' : 'warning'}">${escapeHtml(scan.status)}</span>`;
+        const reportCell = row.insertCell();
+        if (scan.report_md_path || scan.report_json_path) {
+            const reportPath = scan.report_md_path || scan.report_json_path;
+            const filename = reportPath.substring(reportPath.lastIndexOf('/') + 1).substring(reportPath.lastIndexOf('\\') + 1);
+            reportCell.innerHTML = `<a href="/report/${encodeURIComponent(filename)}" class="btn btn-sm btn-outline-primary">View Report</a>`;
+        } else {
+            reportCell.textContent = 'N/A';
         }
     });
+     console.log("Recent scans updated on dashboard:", scans);
 }
 
-// Load history data
+
+function updateTopVulnerabilities(data) {
+    // This function would populate a list or chart of top vulnerabilities on the dashboard
+    const topVulnsListEl = document.getElementById('topVulnerabilitiesList'); // Assuming this ID
+    if (topVulnsListEl && data && data.length > 0) {
+        let html = '<ul class="list-group">';
+        data.forEach(vuln => {
+            html += `<li class="list-group-item d-flex justify-content-between align-items-center">
+                        ${escapeHtml(vuln.name)}
+                        <span class="badge bg-primary rounded-pill">${vuln.count}</span>
+                     </li>`;
+        });
+        html += '</ul>';
+        topVulnsListEl.innerHTML = html;
+    } else if (topVulnsListEl) {
+         topVulnsListEl.innerHTML = '<p class="text-muted">No vulnerability data to display.</p>';
+    }
+    console.log("Top vulnerabilities updated (placeholder):", data);
+}
+
+
 function loadHistoryData() {
     fetch('/api/history')
         .then(response => response.json())
         .then(data => {
             displayHistoryItems(data);
-        })
-        .catch(error => {
-            console.error('Error loading history data:', error);
+        }).catch(error => {
+            console.error('Error loading scan history:', error);
+            const historyContainer = document.querySelector('.history-container');
+            if (historyContainer) {
+                 historyContainer.innerHTML = '<div class="alert alert-danger">Could not load scan history.</div>';
+            }
         });
 }
 
 function displayHistoryItems(scans) {
-    const historyContainer = document.getElementById('historyItems');
-    if (!historyContainer) return;
-    
-    // Clear loading state
-    historyContainer.innerHTML = '';
-    
-    if (!scans || scans.length === 0) {
-        historyContainer.innerHTML = '<div class="alert alert-info">No scan history found</div>';
+    const historyTableBody = document.querySelector('#historyTable tbody'); // Assuming ID historyTable
+    if (!historyTableBody) {
+        console.error("History table body not found.");
         return;
     }
-    
-    // Create table
-    const table = document.createElement('table');
-    table.className = 'table table-hover';
-    
-    table.innerHTML = `
-        <thead>
-            <tr>
-                <th>URL</th>
-                <th>Scan Type</th>
-                <th>Date & Time</th>
-                <th>Duration</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody></tbody>
-    `;
-    
-    const tbody = table.querySelector('tbody');
-    
+    historyTableBody.innerHTML = ''; // Clear existing rows
+
+    if (!scans || scans.length === 0) {
+        historyTableBody.innerHTML = '<tr><td colspan="7" class="text-center">No scan history found.</td></tr>';
+        return;
+    }
+
     scans.forEach(scan => {
-        const row = document.createElement('tr');
+        const row = historyTableBody.insertRow();
+        row.insertCell().textContent = scan.id;
         
-        row.innerHTML = `
-            <td class="text-truncate" style="max-width: 200px;">${scan.url}</td>
-            <td>${scan.type || 'Standard'}</td>
-            <td>${scan.time}</td>
-            <td>${scan.duration || 'N/A'}</td>
-            <td>
-                <a href="/report/${scan.report_file}" class="btn btn-sm btn-primary">View Report</a>
-            </td>
-        `;
+        const targetCell = row.insertCell();
+        targetCell.innerHTML = `<a href="${escapeHtml(scan.target_url)}" target="_blank" title="${escapeHtml(scan.target_url)}">${escapeHtml(truncate(scan.target_url,30))}</a>`;
         
-        tbody.appendChild(row);
+        row.insertCell().textContent = escapeHtml(scan.scan_type || 'N/A');
+        row.insertCell().textContent = new Date(scan.scan_timestamp || scan.timestamp).toLocaleString(); // Ensure timestamp field is correct
+        
+        let statusBadge = 'secondary';
+        if (scan.status === 'Completed') statusBadge = 'success';
+        if (scan.status === 'Error' || scan.status === 'Failed') statusBadge = 'danger';
+        if (scan.status === 'Running') statusBadge = 'info progress-bar-striped progress-bar-animated';
+        row.insertCell().innerHTML = `<span class="badge bg-${statusBadge}">${escapeHtml(scan.status)}</span>`;
+
+        const duration = scan.duration ? `${scan.duration}s` : (scan.start_time && scan.end_time ? `${Math.round((new Date(scan.end_time) - new Date(scan.start_time))/1000)}s` : 'N/A');
+        row.insertCell().textContent = duration;
+
+        const actionsCell = row.insertCell();
+        let actionsHtml = '';
+        if (scan.report_md_path || scan.report_json_path) {
+             const reportPath = scan.report_md_path || scan.report_json_path;
+             const filename = reportPath.substring(reportPath.lastIndexOf('/') + 1).substring(reportPath.lastIndexOf('\\') + 1);
+             actionsHtml += `<a href="/report/${encodeURIComponent(filename)}" class="btn btn-sm btn-outline-primary me-1" title="View Report"><i class="bi bi-file-earmark-text"></i></a>`;
+        } else if (scan.status === 'Completed' || scan.status === 'Error' || scan.status ==='Failed'){
+             actionsHtml += `<button class="btn btn-sm btn-outline-secondary me-1" title="Report not available" disabled><i class="bi bi-file-earmark-excel"></i></button>`;
+        }
+        
+        // Add delete button
+        actionsHtml += `<button class="btn btn-sm btn-outline-danger" title="Delete Scan ${scan.id}" onclick="deleteScanHistory(${scan.id}, this)"><i class="bi bi-trash"></i></button>`;
+        actionsCell.innerHTML = actionsHtml;
     });
+}
+
+function deleteScanHistory(scanId, buttonElement) {
+    if (!confirm(`Are you sure you want to delete scan history ID ${scanId}? This will also delete associated report files.`)) {
+        return;
+    }
+    fetch(`/api/history/${scanId}`, { method: 'DELETE' })
+        .then(response => response.json().then(data => ({ ok: response.ok, status: response.status, data })))
+        .then(result => {
+            if (result.ok) {
+                alert(result.data.message || `Scan history ${scanId} deleted.`);
+                // Remove row from table or reload history
+                if (buttonElement) {
+                    buttonElement.closest('tr').remove();
+                } else {
+                    loadHistoryData(); // Fallback to reload all
+                }
+            } else {
+                alert(`Error deleting scan: ${result.data.error || `Server returned ${result.status}`}`);
+            }
+        })
+        .catch(error => {
+            console.error('Error deleting scan history:', error);
+            alert('Failed to delete scan history. See console for details.');
+        });
+}
+
+// Add this if not already present for settings page functionality
+function saveLLMSettings() {
+    const form = document.getElementById('llmSettingsForm'); // Assuming form ID
+    if (!form) return;
+
+    const payload = {
+        deepseek_api_key: form.elements['deepseek_api_key'].value,
+        deepseek_api_base: form.elements['deepseek_api_base'].value,
+        openai_api_key: form.elements['openai_api_key'].value,
+        openai_api_base: form.elements['openai_api_base'].value,
+    };
+
+    const messageDiv = document.getElementById('settingsMessage'); // For feedback
+
+    fetch('/api/settings/llm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(response => response.json().then(data => ({ ok: response.ok, data })))
+    .then(result => {
+        if (messageDiv) {
+            messageDiv.textContent = result.data.message || result.data.error;
+            messageDiv.className = result.ok ? 'alert alert-success' : 'alert alert-danger';
+            messageDiv.style.display = 'block';
+        }
+    })
+    .catch(error => {
+        if (messageDiv) {
+            messageDiv.textContent = 'Error saving settings: ' + error.message;
+            messageDiv.className = 'alert alert-danger';
+            messageDiv.style.display = 'block';
+        }
+        console.error("Error saving LLM settings:", error);
+    });
+}
+
+// Make sure event listener for settings form is added if settings page uses this
+document.addEventListener('DOMContentLoaded', function() {
+    const llmSettingsForm = document.getElementById('llmSettingsForm');
+    if (llmSettingsForm) {
+        llmSettingsForm.addEventListener('submit', function(event) {
+            event.preventDefault();
+            saveLLMSettings();
+        });
+    }
+});
+
+function updateUIAfterScanEnd(isSuccess, scanId, resultPayload) {
+    if (statusPollTimeoutId) clearTimeout(statusPollTimeoutId);
     
-    historyContainer.appendChild(table);
+    const scanProgressEl = document.getElementById('scanProgress');
+    const scanProgressTextEl = document.getElementById('scanProgressText');
+
+    if (scanProgressEl) {
+        scanProgressEl.classList.remove('progress-bar-animated');
+        if (isSuccess) {
+            scanProgressEl.style.width = '100%'; // Ensure it's 100% on success
+            if(scanProgressTextEl) scanProgressTextEl.textContent = '100%';
+            scanProgressEl.classList.remove('bg-danger');
+            scanProgressEl.classList.add('bg-success');
+        } else {
+            // For failures, progress might not be 100%, but bar should reflect error.
+            // Width will be whatever it was, or you can set it to 100% too.
+            // scanProgressEl.style.width = '100%'; 
+            scanProgressEl.classList.remove('bg-success');
+            scanProgressEl.classList.add('bg-danger');
+        }
+    }
+
+    if (isSuccess && resultPayload && (typeof resultPayload === 'string' || (resultPayload.markdown || resultPayload.json))) {
+        const reportBtn = document.getElementById('viewReportBtn');
+        let reportPath = '';
+
+        if (typeof resultPayload === 'string') { // If resultPayload is just a path string
+            reportPath = resultPayload;
+        } else if (resultPayload.markdown) {
+            reportPath = resultPayload.markdown;
+        } else if (resultPayload.json) {
+            reportPath = resultPayload.json;
+        }
+        
+        const filename = reportPath.substring(reportPath.lastIndexOf('/') + 1).substring(reportPath.lastIndexOf('\\') + 1);
+        if (reportBtn && filename) {
+            reportBtn.href = `/report/${encodeURIComponent(filename)}`;
+            reportBtn.style.display = 'inline-block';
+            appendToConsole(`Scan completed. Report available: ${filename}`);
+        }
+    } else if (!isSuccess) {
+        // Ensure report button is hidden if scan failed or no report
+        const reportBtn = document.getElementById('viewReportBtn');
+        if(reportBtn) reportBtn.style.display = 'none';
+        appendToConsole(`Scan ended. Status: ${typeof resultPayload === 'string' ? resultPayload : 'Failed/Error'}`);
+    }
 } 

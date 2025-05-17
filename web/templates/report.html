@@ -108,13 +108,9 @@
     document.addEventListener('DOMContentLoaded', function() {
         // Extract the actual report filename from the URL path
         const pathParts = window.location.pathname.split('/');
-        // The last part of the path should be the filename
         let reportPath = pathParts[pathParts.length - 1];
-        
-        // If the path contains spaces or special characters it might be URL encoded
         reportPath = decodeURIComponent(reportPath);
         
-        // Kiểm tra nếu reportPath là undefined hoặc null hoặc "undefined"
         if (!reportPath || reportPath === 'undefined') {
             document.getElementById('reportLoader').innerHTML = `
                 <div class="alert alert-danger">
@@ -129,118 +125,186 @@
             return;
         }
         
-        // Check if this is a scan_reports path or original format
-        if (!reportPath.includes('/')) {
-            // For backward compatibility, check if it's in scan_reports directory
-            if (reportPath.startsWith('report_')) {
-                reportPath = 'scan_reports/' + reportPath;
-            }
-        }
-        
-        // Determine file extensions and set up download buttons
+        // Logic xác định jsonPath, mdPath và download buttons giữ nguyên
+        // ... (phần code từ dòng 129 đến 154 của file gốc giữ nguyên) ...
         let jsonPath, mdPath;
         
         if (reportPath.endsWith('.json')) {
-            // If it's a JSON file
             jsonPath = reportPath;
             mdPath = reportPath.replace('.json', '.md');
         } else if (reportPath.endsWith('.md')) {
-            // If it's a Markdown file
             mdPath = reportPath;
             jsonPath = reportPath.replace('.md', '.json');
         } else if (reportPath.endsWith('.txt')) {
-            // If it's a TXT file (backward compatibility)
             jsonPath = reportPath.replace('.txt', '.json');
             mdPath = reportPath.replace('.txt', '.md');
         } else {
-            // If no file extension, try both
-            jsonPath = reportPath + '.json';
-            mdPath = reportPath + '.md';
+            // If no file extension, assume it might be a base name, try to append.
+            // The initial loadReport will try the given reportPath first.
+            // Fallbacks can try .json and .md
+            jsonPath = reportPath + '.json'; // Default to try
+            mdPath = reportPath + '.md';   // Default to try
         }
         
-        document.getElementById('downloadJsonBtn').href = `/api/report/${jsonPath}`;
+        document.getElementById('downloadJsonBtn').href = `/api/report/${encodeURIComponent(jsonPath)}`;
         document.getElementById('downloadJsonBtn').download = jsonPath.split('/').pop();
         
-        document.getElementById('downloadMdBtn').href = `/api/report/${mdPath}`;
+        document.getElementById('downloadMdBtn').href = `/api/report/${encodeURIComponent(mdPath)}`;
         document.getElementById('downloadMdBtn').download = mdPath.split('/').pop();
         
         document.getElementById('reportActions').style.display = 'block';
-        
-        // Setup view toggle buttons
+
+
         const jsonViewBtn = document.getElementById('jsonViewBtn');
         const markdownViewBtn = document.getElementById('markdownViewBtn');
         
-        // Store report data globally for view switching
         window.reportData = {
             jsonData: null,
             markdownData: null,
-            currentPath: reportPath,
+            currentPath: reportPath, // The path derived from URL, used as a base for switching
+            currentLoadedJsonPath: null,
+            currentLoadedMarkdownPath: null,
             hasVulnerabilities: false
         };
         
-        // Add event listeners to toggle buttons
         jsonViewBtn.addEventListener('click', function() {
             if (!this.classList.contains('active')) {
-                this.classList.add('active');
-                markdownViewBtn.classList.remove('active');
                 showJsonView();
             }
         });
         
         markdownViewBtn.addEventListener('click', function() {
             if (!this.classList.contains('active')) {
-                this.classList.add('active');
-                jsonViewBtn.classList.remove('active');
                 showMarkdownView();
             }
         });
         
-        // Load the report - use the original path
-        loadReport(reportPath);
+        loadReport(reportPath); // Load the initial report based on URL
     });
-    
-    function showJsonView() {
-        // Show JSON view elements
-        document.getElementById('reportSummary').style.display = 'block';
-        document.getElementById('visualizationDashboard').style.display = window.reportData.hasVulnerabilities ? 'block' : 'none';
-        document.getElementById('vulnerabilities').style.display = 'block';
-        
-        // Hide Markdown view
-        document.getElementById('markdownReport').style.display = 'none';
-    }
-    
-    function showMarkdownView() {
-        // Hide JSON view elements
+
+    function showLoadError(error, originalPath) {
+        document.getElementById('reportLoader').style.display = 'block'; // Ensure loader area is visible
+        document.getElementById('reportLoader').innerHTML = `
+            <div class="alert alert-danger">
+                <i class="bi bi-exclamation-triangle me-2"></i> ${escapeHtml(error.message || 'Failed to load report.')}
+            </div>
+            <div class="mt-3">
+                <p>Could not load report for: <strong>${escapeHtml(originalPath)}</strong></p>
+                <p>Possible reasons:</p>
+                <ul>
+                    <li>The report file may have been deleted or is not accessible.</li>
+                    <li>The server might be experiencing issues.</li>
+                </ul>
+                <p>
+                    <a href="/history" class="btn btn-primary">
+                        <i class="bi bi-arrow-left"></i> Return to History
+                    </a>
+                </p>
+            </div>
+        `;
+        // Hide other sections
         document.getElementById('reportSummary').style.display = 'none';
         document.getElementById('visualizationDashboard').style.display = 'none';
         document.getElementById('vulnerabilities').style.display = 'none';
-        
-        // Show Markdown view
+        document.getElementById('markdownReport').style.display = 'none';
+        document.getElementById('viewToggle').style.display = 'none';
+    }
+
+    function showJsonViewUIOnly() {
+        document.getElementById('reportSummary').style.display = 'block';
+        document.getElementById('visualizationDashboard').style.display = window.reportData.hasVulnerabilities ? 'block' : 'none';
+        document.getElementById('vulnerabilities').style.display = 'block';
+        document.getElementById('markdownReport').style.display = 'none';
+
+        document.getElementById('jsonViewBtn').classList.add('active');
+        document.getElementById('markdownViewBtn').classList.remove('active');
+    }
+
+    function showMarkdownViewUIOnly() {
+        document.getElementById('reportSummary').style.display = 'none';
+        document.getElementById('visualizationDashboard').style.display = 'none';
+        document.getElementById('vulnerabilities').style.display = 'none';
         document.getElementById('markdownReport').style.display = 'block';
-        
-        // If we don't have markdown data yet, try to load it
-        if (!window.reportData.markdownData) {
-            const mdPath = window.reportData.currentPath.endsWith('.json') 
-                ? window.reportData.currentPath.replace('.json', '.md') 
-                : window.reportData.currentPath + '.md';
-                
-            tryLoadReport(mdPath)
-                .then(success => {
-                    // Successfully loaded markdown
+
+        document.getElementById('jsonViewBtn').classList.remove('active');
+        document.getElementById('markdownViewBtn').classList.add('active');
+    }
+    
+    function showJsonView() {
+        showJsonViewUIOnly();
+
+        let targetJsonPath = '';
+        if (window.reportData.currentPath.endsWith('.md')) {
+            targetJsonPath = window.reportData.currentPath.replace('.md', '.json');
+        } else if (window.reportData.currentPath.endsWith('.json')) {
+            targetJsonPath = window.reportData.currentPath;
+        } else { // No extension or unknown, assume we want a .json
+            targetJsonPath = window.reportData.currentPath + '.json';
+        }
+
+        if (!window.reportData.jsonData || window.reportData.currentLoadedJsonPath !== targetJsonPath) {
+            console.log("[ReportHTML] JSON data missing or for different path, attempting to load:", targetJsonPath);
+            document.getElementById('reportLoader').style.display = 'block';
+             // Clear potential previous JSON content to avoid confusion while loading
+            document.getElementById('reportSummary').innerHTML = '';
+            document.getElementById('vulnerabilities').innerHTML = '';
+            document.getElementById('visualizationDashboard').style.display = 'none';
+
+
+            tryLoadReport(targetJsonPath)
+                .then(() => {
+                    window.reportData.currentLoadedJsonPath = targetJsonPath;
+                    // displayReport (called by tryLoadReport) will handle UI population and hiding loader
                 })
                 .catch(error => {
-                    // If markdown loading fails, generate it from JSON
-                    if (window.reportData.jsonData) {
-                        const generatedMarkdown = generateMarkdownFromJson(window.reportData.jsonData);
-                        displayMarkdownReport(generatedMarkdown);
-                    } else {
-                        document.getElementById('markdownContent').innerHTML = `
-                            <div class="alert alert-warning">
-                                <i class="bi bi-exclamation-triangle me-2"></i>
-                                Markdown report is not available and cannot be generated.
-                            </div>
-                        `;
-                    }
+                    console.error("[ReportHTML] Failed to load JSON report for JSON view:", error);
+                    document.getElementById('reportLoader').style.display = 'none';
+                    document.getElementById('reportSummary').innerHTML = 
+                        `<div class="alert alert-danger">Failed to load JSON data (${escapeHtml(targetJsonPath)}): ${escapeHtml(error.message)}</div>`;
+                    document.getElementById('visualizationDashboard').style.display = 'none';
+                    document.getElementById('vulnerabilities').style.display = 'none';
+                });
+        } else {
+            // JSON data already loaded and is for the correct path, UI is already set by showJsonViewUIOnly
+            // and displayReport would have populated it.
+            console.log("[ReportHTML] Correct JSON data already loaded, ensuring view.");
+        }
+    }
+
+    function showMarkdownView() {
+        showMarkdownViewUIOnly();
+
+        let targetMdPath = '';
+        if (window.reportData.currentPath.endsWith('.json')) {
+            targetMdPath = window.reportData.currentPath.replace('.json', '.md');
+        } else if (window.reportData.currentPath.endsWith('.md')) {
+            targetMdPath = window.reportData.currentPath;
+        } else { // No extension or unknown, assume we want a .md
+            targetMdPath = window.reportData.currentPath + '.md';
+        }
+        
+        if (window.reportData.markdownData && window.reportData.currentLoadedMarkdownPath === targetMdPath) {
+            console.log("[ReportHTML] Correct Markdown data already loaded, ensuring view.");
+            displayMarkdownReport(window.reportData.markdownData); 
+        } else {
+            console.log("[ReportHTML] Markdown data missing or for different path, attempting to load:", targetMdPath);
+            document.getElementById('reportLoader').style.display = 'block'; 
+            document.getElementById('markdownContent').innerHTML = ''; 
+
+            tryLoadReport(targetMdPath)
+                .then(() => {
+                    window.reportData.currentLoadedMarkdownPath = targetMdPath;
+                    // displayReport (called by tryLoadReport) will handle UI population and hiding loader
+                })
+                .catch(error => {
+                    console.error("[ReportHTML] Failed to load Markdown report:", error);
+                    document.getElementById('reportLoader').style.display = 'none';
+                    document.getElementById('markdownContent').innerHTML = `
+                        <div class="alert alert-danger">
+                            <i class="bi bi-exclamation-triangle me-2"></i>
+                            Failed to load Markdown report (${escapeHtml(targetMdPath)}): ${escapeHtml(error.message)}
+                        </div>
+                    `;
                 });
         }
     }
@@ -250,35 +314,35 @@
         let markdown = '';
         
         // Add header
-        markdown += '# Vulnerability Scan Report\n\n';
+        markdown += '# Vulnerability Scan Report\\n\\n';
         
         // Add summary section
         if (data.summary) {
-            markdown += '## Summary\n\n';
-            markdown += `- **Target URL**: ${data.summary.target_url || 'Unknown'}\n`;
-            markdown += `- **Scan Type**: ${data.summary.scan_type || 'Unknown'}\n`;
-            markdown += `- **Scan Date**: ${formatDate(data.summary.scan_timestamp)}\n`;
-            markdown += `- **Total Vulnerabilities**: ${data.summary.total_vulnerabilities || 0}\n`;
+            markdown += '## Summary\\n\\n';
+            markdown += `- **Target URL**: ${data.summary.target_url || 'Unknown'}\\n`;
+            markdown += `- **Scan Type**: ${data.summary.scan_type || 'Unknown'}\\n`;
+            markdown += `- **Scan Date**: ${formatDate(data.summary.scan_timestamp)}\\n`;
+            markdown += `- **Total Vulnerabilities**: ${data.summary.total_vulnerabilities || 0}\\n`;
             
             if (data.summary.critical_count !== undefined) {
-                markdown += `- **Critical**: ${data.summary.critical_count}\n`;
+                markdown += `- **Critical**: ${data.summary.critical_count}\\n`;
             }
             if (data.summary.high_count !== undefined) {
-                markdown += `- **High**: ${data.summary.high_count}\n`;
+                markdown += `- **High**: ${data.summary.high_count}\\n`;
             }
             if (data.summary.medium_count !== undefined) {
-                markdown += `- **Medium**: ${data.summary.medium_count}\n`;
+                markdown += `- **Medium**: ${data.summary.medium_count}\\n`;
             }
             if (data.summary.low_count !== undefined) {
-                markdown += `- **Low**: ${data.summary.low_count}\n`;
+                markdown += `- **Low**: ${data.summary.low_count}\\n`;
             }
             
-            markdown += `- **Overall Risk Level**: ${data.summary.overall_risk_level || 'Unknown'}\n\n`;
+            markdown += `- **Overall Risk Level**: ${data.summary.overall_risk_level || 'Unknown'}\\n\\n`;
         }
         
         // Add vulnerabilities section
         if (data.vulnerabilities && data.vulnerabilities.length > 0) {
-            markdown += '## Vulnerabilities\n\n';
+            markdown += '## Vulnerabilities\\n\\n';
             
             // Group by severity
             const criticalVulns = data.vulnerabilities.filter(v => v.severity && v.severity.toLowerCase().includes('critical'));
@@ -288,7 +352,7 @@
             
             // Add Critical vulnerabilities
             if (criticalVulns.length > 0) {
-                markdown += '### Critical Severity\n\n';
+                markdown += '### Critical Severity\\n\\n';
                 criticalVulns.forEach(vuln => {
                     markdown += formatVulnerabilityMarkdown(vuln);
                 });
@@ -296,7 +360,7 @@
             
             // Add High vulnerabilities
             if (highVulns.length > 0) {
-                markdown += '### High Severity\n\n';
+                markdown += '### High Severity\\n\\n';
                 highVulns.forEach(vuln => {
                     markdown += formatVulnerabilityMarkdown(vuln);
                 });
@@ -304,7 +368,7 @@
             
             // Add Medium vulnerabilities
             if (mediumVulns.length > 0) {
-                markdown += '### Medium Severity\n\n';
+                markdown += '### Medium Severity\\n\\n';
                 mediumVulns.forEach(vuln => {
                     markdown += formatVulnerabilityMarkdown(vuln);
                 });
@@ -312,173 +376,162 @@
             
             // Add Low vulnerabilities
             if (lowVulns.length > 0) {
-                markdown += '### Low Severity\n\n';
+                markdown += '### Low Severity\\n\\n';
                 lowVulns.forEach(vuln => {
                     markdown += formatVulnerabilityMarkdown(vuln);
                 });
             }
         } else {
-            markdown += '## No vulnerabilities found\n\n';
+            markdown += '## No vulnerabilities found\\n\\n';
         }
         
         return markdown;
     }
-    
+
     function formatVulnerabilityMarkdown(vuln) {
         let md = '';
-        md += `#### ${vuln.name || vuln.type || 'Unknown Vulnerability'}\n\n`;
+        md += `#### ${vuln.name || vuln.type || 'Unknown Vulnerability'}\\n\\n`;
         
         if (vuln.id) {
-            md += `- **ID**: ${vuln.id}\n`;
+            md += `- **ID**: ${vuln.id}\\n`;
         }
         
         if (vuln.severity) {
-            md += `- **Severity**: ${vuln.severity}\n`;
+            md += `- **Severity**: ${vuln.severity}\\n`;
         }
         
         if (vuln.cvss_score) {
-            md += `- **CVSS Score**: ${vuln.cvss_score}\n`;
+            md += `- **CVSS Score**: ${vuln.cvss_score}\\n`;
         }
         
         if (vuln.location) {
-            md += `- **Location**: ${vuln.location}\n`;
+            md += `- **Location**: ${vuln.location}\\n`;
         }
         
         if (vuln.parameter) {
-            md += `- **Parameter**: ${vuln.parameter}\n`;
+            md += `- **Parameter**: ${vuln.parameter}\\n`;
         }
         
         if (vuln.description) {
-            md += `\n**Description**:\n\n${vuln.description}\n\n`;
+            md += `\\n**Description**:\\n\\n${vuln.description}\\n\\n`;
         }
         
         if (vuln.remediation) {
-            md += `**Remediation**:\n\n${vuln.remediation}\n\n`;
+            md += `**Remediation**:\\n\\n${vuln.remediation}\\n\\n`;
         }
         
-        md += '---\n\n';
+        md += '---\\n\\n';
         return md;
     }
-    
-    function loadReport(path) {
-        // First try to load the report with the original path
-        tryLoadReport(path)
+
+
+    function loadReport(initialPath) {
+        console.log(`[ReportHTML] Initial loadReport for: ${initialPath}`);
+        window.reportData.currentPath = initialPath;
+
+        document.getElementById('reportLoader').style.display = 'block';
+        document.getElementById('reportSummary').style.display = 'none';
+        document.getElementById('visualizationDashboard').style.display = 'none';
+        document.getElementById('vulnerabilities').style.display = 'none';
+        document.getElementById('markdownReport').style.display = 'none';
+
+
+        tryLoadReport(initialPath)
             .catch(error => {
-                console.error("Failed to load report with original path:", error);
-                
-                // If original load fails, try alternatives
-                if (!path.includes('.')) {
-                    console.log("Trying with .json extension");
-                    return tryLoadReport(path + '.json')
-                        .catch(e => {
-                            console.log("Trying with .md extension");
-                            return tryLoadReport(path + '.md');
-                        });
-                } else if (path.endsWith('.json')) {
-                    // If JSON fails, try MD
-                    console.log("Trying with .md instead of .json");
-                    return tryLoadReport(path.replace('.json', '.md'));
-                } else if (path.endsWith('.md')) {
-                    // If MD fails, try JSON
-                    console.log("Trying with .json instead of .md");
-                    return tryLoadReport(path.replace('.md', '.json'));
-                } else if (path.endsWith('.txt')) {
-                    // If TXT fails, try JSON
-                    console.log("Trying with .json instead of .txt");
-                    return tryLoadReport(path.replace('.txt', '.json'));
+                console.error(`[ReportHTML] Failed to load initial report ${initialPath}:`, error);
+                let fallbackPath = null;
+                if (initialPath.endsWith('.json')) {
+                    fallbackPath = initialPath.replace('.json', '.md');
+                } else if (initialPath.endsWith('.md')) {
+                    fallbackPath = initialPath.replace('.md', '.json');
+                } else if (!initialPath.includes('.')) { // No extension, default to trying JSON then MD
+                     fallbackPath = initialPath + '.json';
                 }
-                // If all fails, throw the original error
-                throw error;
-            })
-            .catch(error => {
-                document.getElementById('reportLoader').innerHTML = `
-                    <div class="alert alert-danger">
-                        <i class="bi bi-exclamation-triangle me-2"></i> ${error.message}
-                    </div>
-                    <div class="mt-3">
-                        <p>Possible reasons:</p>
-                        <ul>
-                            <li>The report file may have been deleted</li>
-                            <li>The file extension might be different (.json or .md)</li>
-                            <li>There was a server error processing the report</li>
-                        </ul>
-                        <p>
-                            <a href="/history" class="btn btn-primary">
-                                <i class="bi bi-arrow-left"></i> Return to History
-                            </a>
-                        </p>
-                    </div>
-                `;
+
+                if (fallbackPath) {
+                    console.log(`[ReportHTML] Initial load failed. Trying fallback: ${fallbackPath}`);
+                    return tryLoadReport(fallbackPath)
+                        .catch(fallbackError => {
+                            console.error(`[ReportHTML] Fallback load also failed for ${fallbackPath}:`, fallbackError);
+                            // If first fallback (e.g. .json) failed and original had no extension, try .md
+                            if (!initialPath.includes('.') && fallbackPath.endsWith('.json')) {
+                                let lastAttemptPath = initialPath + '.md';
+                                console.log(`[ReportHTML] Fallback ${fallbackPath} failed. Trying last attempt: ${lastAttemptPath}`);
+                                return tryLoadReport(lastAttemptPath)
+                                    .catch(finalError => showLoadError(finalError, initialPath));
+                            }
+                            showLoadError(fallbackError, initialPath); // Show error against original path after specific fallback
+                        });
+                } else {
+                    showLoadError(error, initialPath);
+                }
             });
     }
     
     function tryLoadReport(path) {
-        return fetch(`/api/report/${path}`)
+        console.log(`[ReportHTML] tryLoadReport called for: ${path}`);
+        return fetch(`/api/report/${encodeURIComponent(path)}`)
             .then(response => {
                 if (!response.ok) {
-                    throw new Error(`Failed to load report: ${response.status} ${response.statusText}`);
+                    return response.text().then(text => {
+                        let errorDetail = `Server responded with status ${response.status} ${response.statusText}.`;
+                        if (text) {
+                            try {
+                                const errJson = JSON.parse(text);
+                                if (errJson && errJson.error) errorDetail = errJson.error;
+                            } catch (e) {
+                                errorDetail = (text.length > 0 && text.length < 500) ? text : `Server error (status ${response.status}). Response body not parseable as JSON.`;
+                            }
+                        }
+                        console.error(`[ReportHTML] Fetch error for ${path}: ${errorDetail}`);
+                        throw new Error(errorDetail);
+                    });
                 }
-                return response.json();
+                if (path.endsWith('.md')) {
+                    return response.text().then(textData => ({ type: 'markdown', content: textData, originalPath: path }));
+                } else { 
+                    return response.json().then(jsonData => ({ type: 'json', content: jsonData, originalPath: path }));
+                }
             })
-            .then(data => {
-                if (data.content) {
-                    // API returns content wrapped in a content field
-                    if (path.endsWith('.md')) {
-                        // Store markdown data
-                        window.reportData.markdownData = data.content;
-                    } else {
-                        // Store JSON data
-                        window.reportData.jsonData = data.content;
-                    }
-                    displayReport(data.content, path);
-                } else {
-                    // Direct JSON data
-                    if (path.endsWith('.md')) {
-                        // Store markdown data
-                        window.reportData.markdownData = data;
-                    } else {
-                        // Store JSON data
-                        window.reportData.jsonData = data;
-                    }
-                    displayReport(data, path);
+            .then(result => { 
+                console.log(`[ReportHTML] Data received for ${result.originalPath}, type: ${result.type}`);
+                if (result.type === 'markdown') {
+                    window.reportData.markdownData = result.content;
+                    window.reportData.currentLoadedMarkdownPath = result.originalPath; // Track what MD is loaded
+                    displayReport(result.content, result.originalPath); 
+                } else { 
+                    window.reportData.jsonData = result.content;
+                    window.reportData.currentLoadedJsonPath = result.originalPath; // Track what JSON is loaded
+                    displayReport(result.content, result.originalPath);
                 }
-                return true; // Successfully loaded
+                return true; 
             });
     }
     
     function displayReport(data, path) {
-        // Hide loader
         document.getElementById('reportLoader').style.display = 'none';
-        
-        // Show view toggle buttons if not already visible
         document.getElementById('viewToggle').style.display = 'flex';
-        
-        // Check if this is a markdown report
-        if ((data.type === 'markdown') || (path && path.endsWith('.md'))) {
-            // If it's markdown, store it and switch to markdown view
-            window.reportData.markdownData = data.content || data;
-            
-            // Update toggle button states
-            document.getElementById('jsonViewBtn').classList.remove('active');
-            document.getElementById('markdownViewBtn').classList.add('active');
-            
-            displayMarkdownReport(data.content || data);
+
+        if (path && path.endsWith('.md')) {
+            // data here is the raw markdown string
+            window.reportData.markdownData = data; // Ensure it's set
+            window.reportData.currentLoadedMarkdownPath = path;
+            displayMarkdownReport(data);
+            showMarkdownViewUIOnly(); // Ensure correct UI and button state
             return;
         }
         
-        // It's a JSON report, process it
-        
-        // Show summary section for JSON reports
+        // If not .md, assume it's JSON and data is the parsed JSON object
+        window.reportData.jsonData = data; // Ensure it's set
+        window.reportData.currentLoadedJsonPath = path;
+
+        // Process JSON report (existing logic from original displayReport)
         const summarySection = document.getElementById('reportSummary');
-        summarySection.style.display = 'block';
-        
-        // Update toggle button states
-        document.getElementById('jsonViewBtn').classList.add('active');
-        document.getElementById('markdownViewBtn').classList.remove('active');
-        
-        // Kiểm tra nếu dữ liệu là kết quả dạng text
+        // summarySection.style.display = 'block'; // Handled by showJsonViewUIOnly
+        showJsonViewUIOnly(); // Ensure correct UI and button state
+
         if (data.type === 'text' && data.text_result) {
-            // Hiển thị kết quả dạng text
+            // ... (phần code từ dòng 440 đến 459 của file gốc giữ nguyên) ...
             summarySection.innerHTML = `
                 <div class="row">
                     <div class="col-12">
@@ -490,63 +543,50 @@
                 </div>
             `;
             
-            // Hiển thị văn bản kết quả trong phần vulnerabilities
             document.getElementById('vulnerabilities').innerHTML = `
                 <div class="card">
                     <div class="card-header">
                         <h5 class="card-title">Scan Result (Text)</h5>
                     </div>
                     <div class="card-body">
-                        <pre class="vulnerability-details">${data.text_result}</pre>
+                        <pre class="vulnerability-details">${escapeHtml(data.text_result)}</pre>
                     </div>
                 </div>
             `;
-            
+            window.reportData.hasVulnerabilities = false; // No structured vulns for dashboard
+            document.getElementById('visualizationDashboard').style.display = 'none';
             return;
         }
         
-        // Process JSON report - Check for different formats
         let targetUrl = '';
         let scanDate = '';
         let totalVulns = 0;
         let vulnerabilities = [];
         
-        // Extract from "summary" format (JSON Formatter Agent output)
         if (data.summary) {
+            // ... (phần code từ dòng 468 đến 488 của file gốc giữ nguyên) ...
             targetUrl = data.summary.target_url || '';
-            
-            // Improved timestamp handling
             if (data.summary.scan_timestamp) {
-                // Try to parse the timestamp in different formats
                 if (typeof data.summary.scan_timestamp === 'number') {
-                    // Unix timestamp (seconds)
                     scanDate = new Date(data.summary.scan_timestamp * 1000).toLocaleString();
                 } else if (!isNaN(parseInt(data.summary.scan_timestamp))) {
-                    // Numeric string that can be parsed as timestamp
                     scanDate = new Date(parseInt(data.summary.scan_timestamp) * 1000).toLocaleString();
                 } else {
-                    // Already formatted date string
                     scanDate = data.summary.scan_timestamp;
                 }
             }
-            
             totalVulns = data.summary.total_vulnerabilities || 0;
-            
-            // Extract vulnerabilities
             if (data.vulnerabilities && Array.isArray(data.vulnerabilities)) {
                 vulnerabilities = data.vulnerabilities;
             }
         } 
-        // Extract from older format
-        else if (data.findings) {
+        else if (data.findings) { // Older format
+            // ... (phần code từ dòng 490 đến 515 của file gốc giữ nguyên) ...
             vulnerabilities = data.findings;
             totalVulns = vulnerabilities.length;
-            
             if (data.target_url) {
                 targetUrl = data.target_url;
             }
-            
-            // Improved timestamp handling for older format
             if (data.scan_date) {
                 if (typeof data.scan_date === 'number') {
                     scanDate = new Date(data.scan_date * 1000).toLocaleString();
@@ -556,7 +596,6 @@
                     scanDate = data.scan_date;
                 }
             } else if (data.timestamp) {
-                // Alternative timestamp field
                 if (typeof data.timestamp === 'number') {
                     scanDate = new Date(data.timestamp * 1000).toLocaleString();
                 } else if (!isNaN(parseInt(data.timestamp))) {
@@ -565,17 +604,23 @@
                     scanDate = data.timestamp;
                 }
             }
+        } else if (Array.isArray(data)) { // Direct array of vulnerabilities (very old format)
+            vulnerabilities = data;
+            totalVulns = vulnerabilities.length;
+            // Try to find target and date from first vuln if possible (heuristic)
+            if (vulnerabilities.length > 0 && vulnerabilities[0].target_url) {
+                targetUrl = vulnerabilities[0].target_url;
+            }
+             // No reliable date for this format from top level
         }
-        
-        // Store whether we have vulnerabilities for the view toggle
+
+
         window.reportData.hasVulnerabilities = vulnerabilities.length > 0;
         
-        // Count vulnerabilities by severity
         let criticalCount = 0, highCount = 0, mediumCount = 0, lowCount = 0;
-        
         vulnerabilities.forEach(vuln => {
+            // ... (phần code từ dòng 523 đến 530 của file gốc giữ nguyên) ...
             if (!vuln.severity) return;
-            
             const severity = vuln.severity.toLowerCase();
             if (severity.includes('critical')) criticalCount++;
             else if (severity.includes('high')) highCount++;
@@ -583,12 +628,11 @@
             else if (severity.includes('low')) lowCount++;
         });
         
-        // Generate summary card
         summarySection.innerHTML = `
             <div class="row mb-4">
                 <div class="col-md-6">
                     <h5>Target: ${escapeHtml(targetUrl)}</h5>
-                    <p class="text-muted">Scanned on: ${formatDate(scanDate)}</p>
+                    <p class="text-muted">Scanned on: ${escapeHtml(formatDate(scanDate))}</p>
                 </div>
                 <div class="col-md-6 text-md-end">
                     <span class="badge bg-danger me-2">${criticalCount} Critical</span>
@@ -597,7 +641,6 @@
                     <span class="badge bg-info text-dark">${lowCount} Low</span>
                 </div>
             </div>
-            
             <div class="d-flex align-items-center mb-3">
                 <div class="progress flex-grow-1 me-3" style="height: 10px;">
                     <div class="progress-bar bg-danger" role="progressbar" style="width: ${getPercentage(criticalCount, totalVulns)}%" aria-valuenow="${criticalCount}" aria-valuemin="0" aria-valuemax="${totalVulns}"></div>
@@ -609,35 +652,26 @@
             </div>
         `;
         
-        // If we have vulnerabilities, show the visualization dashboard
-        if (vulnerabilities.length > 0) {
+        if (window.reportData.hasVulnerabilities) {
             document.getElementById('visualizationDashboard').style.display = 'block';
             createVisualizationCharts(vulnerabilities, criticalCount, highCount, mediumCount, lowCount);
+        } else {
+             document.getElementById('visualizationDashboard').style.display = 'none';
         }
         
-        // Generate vulnerability cards
         let vulnerabilityHTML = '';
-        
-        // First Critical
         vulnerabilityHTML += generateVulnerabilityGroup('Critical', 'danger', vulnerabilities.filter(v => v.severity && v.severity.toLowerCase().includes('critical')));
-        
-        // Then High
         vulnerabilityHTML += generateVulnerabilityGroup('High', 'warning', vulnerabilities.filter(v => v.severity && v.severity.toLowerCase().includes('high')));
-        
-        // Then Medium
         vulnerabilityHTML += generateVulnerabilityGroup('Medium', 'primary', vulnerabilities.filter(v => v.severity && v.severity.toLowerCase().includes('medium')));
-        
-        // Then Low
         vulnerabilityHTML += generateVulnerabilityGroup('Low', 'info', vulnerabilities.filter(v => v.severity && v.severity.toLowerCase().includes('low')));
         
-        // Check if we have any vulnerabilities
         if (vulnerabilityHTML) {
             document.getElementById('vulnerabilities').innerHTML = vulnerabilityHTML;
         } else {
             document.getElementById('vulnerabilities').innerHTML = `
-                <div class="alert alert-success">
+                <div class="alert alert-success mt-3">
                     <i class="bi bi-check-circle me-2"></i>
-                    No vulnerabilities found in this scan.
+                    No structured vulnerabilities found in this scan.
                 </div>
             `;
         }
@@ -668,7 +702,7 @@
                                 const label = context.label || '';
                                 const value = context.raw || 0;
                                 const total = context.chart.data.datasets[0].data.reduce((a, b) => a + b, 0);
-                                const percentage = Math.round((value / total) * 100);
+                                const percentage = total === 0 ? 0 : Math.round((value / total) * 100);
                                 return `${label}: ${value} (${percentage}%)`;
                             }
                         }
@@ -725,10 +759,10 @@
         });
         
         // CVSS score chart (if available)
-        const vulnsWithCvss = vulnerabilities.filter(v => v.cvss_score);
+        const vulnsWithCvss = vulnerabilities.filter(v => v.cvss_score && !isNaN(parseFloat(v.cvss_score)));
         if (vulnsWithCvss.length > 0) {
             // Sort by CVSS score (descending)
-            vulnsWithCvss.sort((a, b) => b.cvss_score - a.cvss_score);
+            vulnsWithCvss.sort((a, b) => parseFloat(b.cvss_score) - parseFloat(a.cvss_score));
             
             const cvssCtx = document.getElementById('cvssScoreChart').getContext('2d');
             new Chart(cvssCtx, {
@@ -737,9 +771,9 @@
                     labels: vulnsWithCvss.map(v => v.name || v.type || 'Unknown'),
                     datasets: [{
                         label: 'CVSS Score',
-                        data: vulnsWithCvss.map(v => v.cvss_score),
+                        data: vulnsWithCvss.map(v => parseFloat(v.cvss_score)),
                         backgroundColor: vulnsWithCvss.map(v => {
-                            const score = v.cvss_score;
+                            const score = parseFloat(v.cvss_score);
                             if (score >= 9.0) return '#dc3545'; // Critical
                             if (score >= 7.0) return '#ffc107'; // High
                             if (score >= 4.0) return '#0d6efd'; // Medium
@@ -769,54 +803,41 @@
                 }
             });
         } else {
-            // If no CVSS scores, show message
             document.getElementById('cvssScoreChart').parentNode.innerHTML = `
                 <div class="alert alert-info text-center">
                     <i class="bi bi-info-circle me-2"></i>
-                    No CVSS score data available
+                    No CVSS score data available for charting.
                 </div>
             `;
         }
     }
-    
+
     function displayMarkdownReport(markdownContent) {
-        // Hide JSON-related sections
-        document.getElementById('reportSummary').style.display = 'none';
-        document.getElementById('visualizationDashboard').style.display = 'none';
-        document.getElementById('vulnerabilities').style.display = 'none';
-        
-        // If we get a string, use it directly
-        let content = typeof markdownContent === 'string' ? markdownContent : '';
-        
-        // If we get an object with markdown_content property, use that
-        if (!content && markdownContent && markdownContent.markdown_content) {
-            content = markdownContent.markdown_content;
+        // UI visibility is handled by showMarkdownViewUIOnly
+        // document.getElementById('reportSummary').style.display = 'none';
+        // document.getElementById('visualizationDashboard').style.display = 'none';
+        // document.getElementById('vulnerabilities').style.display = 'none';
+        // document.getElementById('markdownReport').style.display = 'block';
+
+
+        let content = (typeof markdownContent === 'string') ? markdownContent : '';
+        if (!content && markdownContent && typeof markdownContent === 'object') {
+             // If markdownContent is an object, but not a string (e.g. from old API that wrapped it)
+            if (markdownContent.content && typeof markdownContent.content === 'string') {
+                content = markdownContent.content;
+            } else {
+                 // As a last resort, stringify the object if it's not the expected string
+                content = "Error: Markdown content is not in the expected string format.\\n\\nReceived:\\n```json\\n" + JSON.stringify(markdownContent, null, 2) + "\\n```";
+            }
         }
         
-        // If we still don't have content, try to extract it from the object
-        if (!content && typeof markdownContent === 'object') {
-            content = JSON.stringify(markdownContent, null, 2);
-        }
-        
-        // Set markdown content
         const markdownElement = document.getElementById('markdownContent');
-        
-        // Use the marked library to render markdown to HTML
         if (window.marked) {
-            // Configure marked to handle GFM (GitHub Flavored Markdown)
-            marked.setOptions({
-                breaks: true,
-                gfm: true
-            });
-            
+            marked.setOptions({ breaks: true, gfm: true });
             markdownElement.innerHTML = marked.parse(content);
         } else {
-            // Fallback if marked library isn't loaded
             markdownElement.innerHTML = `<pre>${escapeHtml(content)}</pre>`;
         }
-        
-        // Show the markdown container
-        document.getElementById('markdownReport').style.display = 'block';
     }
     
     function generateVulnerabilityGroup(severityName, colorClass, vulnerabilities) {
@@ -872,7 +893,14 @@
     }
     
     function escapeHtml(unsafe) {
-        if (typeof unsafe !== 'string') return unsafe;
+        if (typeof unsafe !== 'string') {
+            if (unsafe === null || unsafe === undefined) return '';
+            try {
+                return String(unsafe); // Try to convert to string
+            } catch (e) {
+                return ''; // Return empty if conversion fails
+            }
+        }
         return unsafe
              .replace(/&/g, "&amp;")
              .replace(/</g, "&lt;")
@@ -881,47 +909,33 @@
              .replace(/'/g, "&#039;");
     }
     
-    // Helper function to format dates consistently
     function formatDate(timestamp) {
         if (!timestamp) return 'Unknown';
         
         try {
-            // If it's a number (timestamp), convert to date
             if (typeof timestamp === 'number') {
                 return new Date(timestamp * 1000).toLocaleString();
             }
             
-            // If it's a numeric string that can be parsed as timestamp
             if (typeof timestamp === 'string') {
-                // If it's a string of numbers only (unix timestamp)
-                if (/^\d+$/.test(timestamp)) {
+                if (/^\\d+$/.test(timestamp)) {
                     return new Date(parseInt(timestamp) * 1000).toLocaleString();
                 }
-                
-                // If it's already a formatted date string like '2023-05-10 14:30:45'
-                if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(timestamp)) {
-                    return timestamp;
+                if (/^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$/.test(timestamp)) {
+                    return timestamp; // Already well-formatted
                 }
-                
-                // Otherwise, try to parse it as a regular date string
-                const date = new Date(timestamp);
+                const date = new Date(timestamp); // Try parsing directly
                 if (!isNaN(date.getTime())) {
                     return date.toLocaleString();
                 }
             }
-            
-            // If it's already a string date 
-            return timestamp;
+            return String(timestamp); // Fallback to string conversion
         } catch (e) {
-            console.error('Error formatting date:', e);
-            return 'Unknown';
+            console.error('Error formatting date:', e, 'Timestamp was:', timestamp);
+            return 'Invalid Date';
         }
     }
-    
-    // Helper function to format vulnerability card
-    function formatVulnerabilitySummary(vulnerability) {
-        // ... existing code ...
-    }
+
 </script>
 <style>
     .markdown-content {

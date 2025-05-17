@@ -202,273 +202,121 @@
 {% block extra_js %}
 <script>
     document.addEventListener('DOMContentLoaded', function() {
-        // Set up form submission handler
         const scanForm = document.getElementById('scanForm');
         if (scanForm) {
-            scanForm.addEventListener('submit', startScan);
+            scanForm.addEventListener('submit', handleScanFormSubmitInPage);
         }
     });
-    
-    function startScan(event) {
+
+    function handleScanFormSubmitInPage(event) {
         event.preventDefault();
-        
-        // Hide any previous error messages
-        document.getElementById('scanError').style.display = 'none';
-        
-        // Get form data
-        const formData = new FormData(event.target);
-        const targetUrl = formData.get('url');
-        
+
+        const scanErrorDiv = document.getElementById('scanError');
+        if (scanErrorDiv) scanErrorDiv.style.display = 'none';
+
+        const form = event.target;
+        const targetUrl = form.elements['url'].value;
+        const scanType = form.elements['scan_type'] ? form.elements['scan_type'].value : 'basic';
+        const llmProvider = form.elements['llm_provider'] ? form.elements['llm_provider'].value : 'deepseek';
+
         if (!targetUrl) {
-            showError('Please enter a valid URL');
+            showErrorInPage('Please enter a valid URL');
             return;
         }
-        
-        // Show scanning UI
-        document.getElementById('scanFormContainer').style.display = 'none';
-        document.getElementById('scanResults').style.display = 'block';
-        document.getElementById('consoleOutput').innerHTML = '';
-        document.getElementById('vulnerabilityResults').innerHTML = '';
-        document.getElementById('scanProgress').style.width = '0%';
-        document.getElementById('scanProgressText').textContent = '0%';
-        document.getElementById('viewReportBtn').style.display = 'none';
-        
-        // Send the scan request
+
+        const scanFormContainer = document.getElementById('scanFormContainer');
+        const scanResultsDiv = document.getElementById('scanResults');
+        const consoleOutput = document.getElementById('consoleOutput');
+        const vulnerabilityResults = document.getElementById('vulnerabilityResults');
+        const scanProgress = document.getElementById('scanProgress');
+        const scanProgressText = document.getElementById('scanProgressText');
+        const viewReportBtn = document.getElementById('viewReportBtn');
+
+        if(scanFormContainer) scanFormContainer.style.display = 'none';
+        if(scanResultsDiv) scanResultsDiv.style.display = 'block';
+        if(consoleOutput) consoleOutput.innerHTML = '';
+        if(vulnerabilityResults) vulnerabilityResults.innerHTML = '';
+        if(scanProgress) scanProgress.style.width = '0%';
+        if(scanProgressText) scanProgressText.textContent = '0%';
+        if(viewReportBtn) viewReportBtn.style.display = 'none';
+
+        const payload = {
+            target_url: targetUrl,
+            scan_type: scanType,
+            llm_provider: llmProvider
+        };
+
         fetch('/api/scan', {
             method: 'POST',
-            body: formData
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
         })
         .then(response => {
             if (!response.ok) {
-                throw new Error(`Server returned ${response.status} ${response.statusText}`);
+                return response.json().then(errData => {
+                    throw new Error(errData.error || `Server returned ${response.status} ${response.statusText}`);
+                }).catch(() => {
+                    throw new Error(`Server returned ${response.status} ${response.statusText} (and no JSON error body)`);
+                });
             }
             return response.json();
         })
         .then(data => {
-            if (data.error) {
-                throw new Error(data.error);
+            if (data.scan_id) {
+                appendToConsoleInPage('Scan initiated successfully. Scan ID: ' + data.scan_id + ". Waiting for logs...");
+                if (window.initiateScanMonitoring) {
+                    window.initiateScanMonitoring(data.scan_id);
+                } else {
+                    console.warn("Scan monitoring UI (progress, logs) may not be active. Ensure a function like 'window.initiateScanMonitoring(scanId)' is defined and handles UI updates.");
+                    appendToConsoleInPage("Scan started. UI updates (logs, progress) need to be handled by main.js or similar.");
+                }
+            } else {
+                showErrorInPage(data.error || 'Scan started but no scan_id received.');
             }
-            
-            // Start monitoring scan progress
-            monitorScan(data.scan_id);
-            setupEventStream(data.scan_id);
         })
         .catch(error => {
-            showError(`Failed to start scan: ${error.message}`);
-            resetScanForm();
+            showErrorInPage('Failed to start scan: ' + error.message);
+            if(scanFormContainer) scanFormContainer.style.display = 'block';
+            if(scanResultsDiv) scanResultsDiv.style.display = 'none';
         });
     }
-    
-    function monitorScan(scanId) {
-        // Set up interval to check scan status
-        const statusInterval = setInterval(() => {
-            fetch(`/api/scan/${scanId}`)
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error(`Server returned ${response.status} ${response.statusText}`);
-                    }
-                    return response.json();
-                })
-                .then(data => {
-                    // Update progress bar - Fix stuck progress issue
-                    let progress = data.progress || 0;
-                    
-                    // Get current progress from the DOM
-                    const currentProgressText = document.getElementById('scanProgressText').textContent;
-                    const currentProgress = parseInt(currentProgressText) || 0;
-                    
-                    // Important: Don't update progress if already higher AND scan is still running
-                    // This prevents progress from going backward
-                    if (progress < currentProgress && data.status === 'running') {
-                        // Don't update if new progress is lower than current during an active scan
-                        progress = currentProgress;
-                    }
-                    
-                    // Enforce minimum progress to avoid appearing stuck
-                    // If we've been at 10% for too long, nudge forward slightly
-                    if (progress === 10 && currentProgress === 10) {
-                        if (!window.tenPercentStartTime) {
-                            window.tenPercentStartTime = Date.now();
-                        } else if (Date.now() - window.tenPercentStartTime > 15000) { // 15 seconds at 10%
-                            // Nudge progress to avoid appearing stuck
-                            progress = 12;
-                        }
-                    } else {
-                        window.tenPercentStartTime = null;
-                    }
-                    
-                    // Update the DOM with the new progress
-                    document.getElementById('scanProgress').style.width = `${progress}%`;
-                    document.getElementById('scanProgressText').textContent = `${progress}%`;
-                    
-                    // Check if scan is complete
-                    if (data.status === 'completed') {
-                        clearInterval(statusInterval);
-                        fetchScanResult(scanId);
-                        
-                        // Update progress to 100% when completed
-                        document.getElementById('scanProgress').style.width = '100%';
-                        document.getElementById('scanProgressText').textContent = '100%';
-                        
-                        // Update UI for completed scan
-                        document.getElementById('scanProgress').classList.remove('progress-bar-animated');
-                        document.getElementById('stopScanBtn').style.display = 'none';
-                        
-                        // Set links to reports
-                        if (data.report_json_path || data.report_md_path) {
-                            const reportPath = data.report_md_path || data.report_json_path;
-                            const reportBtn = document.getElementById('viewReportBtn');
-                            reportBtn.href = `/report/${encodeURIComponent(reportPath)}`;
-                            reportBtn.style.display = 'inline-block';
-                        }
-                    } 
-                    // Check for error or stopped status
-                    else if (data.status === 'error' || data.status === 'stopped') {
-                        clearInterval(statusInterval);
-                        document.getElementById('scanProgress').classList.remove('progress-bar-animated');
-                        document.getElementById('stopScanBtn').style.display = 'none';
-                        
-                        if (data.status === 'error') {
-                            showError('Scan failed. Please check the console output for details.');
-                        } else if (data.status === 'stopped') {
-                            // Set links to partial reports if available
-                            if (data.report_json_path || data.report_md_path) {
-                                const reportPath = data.report_md_path || data.report_json_path;
-                                const reportBtn = document.getElementById('viewReportBtn');
-                                reportBtn.href = `/report/${encodeURIComponent(reportPath)}`;
-                                reportBtn.style.display = 'inline-block';
-                            }
-                        }
-                    }
-                })
-                .catch(error => {
-                    console.error('Error monitoring scan:', error);
-                    clearInterval(statusInterval);
-                });
-        }, 2000); // Check every 2 seconds
-    }
-    
-    function setupEventStream(scanId) {
-        // Set up event source for real-time console output
-        const eventSource = new EventSource('/api/stream');
-        
-        eventSource.addEventListener('message', function(event) {
-            try {
-                const data = JSON.parse(event.data);
-                
-                // Check if message is for our scan
-                if (data.scan_id === scanId && data.text) {
-                    // Append to console output
-                    appendToConsole(data.text);
-                }
-            } catch (error) {
-                console.error('Error processing event:', error);
-            }
-        });
-        
-        eventSource.addEventListener('error', function() {
-            eventSource.close();
-        });
-    }
-    
-    function fetchScanResult(scanId) {
-        fetch(`/api/scan/${scanId}/result`)
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`Server returned ${response.status} ${response.statusText}`);
-                }
-                return response.json();
-            })
-            .then(data => {
-                if (data.status === 'completed' && data.result) {
-                    displayScanResults(data.result);
-                }
-            })
-            .catch(error => {
-                console.error('Error fetching scan result:', error);
-            });
-    }
-    
-    function displayScanResults(result) {
-        const resultContainer = document.getElementById('vulnerabilityResults');
-        
-        // Clear previous content
-        resultContainer.innerHTML = '';
-        
-        // Create summary card
-        const summaryCard = document.createElement('div');
-        summaryCard.className = 'card mb-4';
-        
-        let vulnerabilitiesFound = 0;
-        if (result.vulnerabilities && Array.isArray(result.vulnerabilities)) {
-            vulnerabilitiesFound = result.vulnerabilities.length;
-        } else if (result.findings && Array.isArray(result.findings)) {
-            vulnerabilitiesFound = result.findings.length;
-        }
-        
-        // Set appropriate color based on vulnerabilities found
-        const statusColor = vulnerabilitiesFound > 0 ? 'danger' : 'success';
-        const statusIcon = vulnerabilitiesFound > 0 ? 'bi-exclamation-triangle' : 'bi-check-circle';
-        const statusText = vulnerabilitiesFound > 0 ? 'Vulnerabilities Detected' : 'No Vulnerabilities Detected';
-        
-        summaryCard.innerHTML = `
-            <div class="card-header bg-${statusColor} text-white">
-                <h5 class="mb-0"><i class="bi ${statusIcon} me-2"></i> Scan Complete - ${statusText}</h5>
-            </div>
-            <div class="card-body">
-                <p class="lead">Found <strong>${vulnerabilitiesFound}</strong> potential vulnerabilities.</p>
-                
-                <div class="alert alert-info">
-                    <i class="bi bi-info-circle me-2"></i>
-                    View the complete report for detailed information about all findings.
-                </div>
-            </div>
-        `;
-        
-        resultContainer.appendChild(summaryCard);
-    }
-    
-    function appendToConsole(text) {
+
+    function appendToConsoleInPage(message) {
         const consoleOutput = document.getElementById('consoleOutput');
-        
-        // Thorough ANSI escape code handling - remove all ANSI escape sequences 
-        // This fixes issues with [1m[95m# Agent:[00m [1m[9 and similar
-        let sanitizedText = text;
-        
-        // Remove color codes and formatting
-        sanitizedText = sanitizedText.replace(/\u001b\[\d+(;\d+)*m/g, '');
-        
-        // Remove other escape sequences (bold, underline, etc.)
-        sanitizedText = sanitizedText.replace(/\u001b\[\d*[a-zA-Z]/g, '');
-        
-        // Replace special agent markers with formatted versions
-        const isAgentLine = sanitizedText.includes('# Agent:') || sanitizedText.includes('Agent:');
-        if (sanitizedText.includes('# Agent:')) {
-            sanitizedText = sanitizedText.replace('# Agent:', '📊 Agent:');
+        if (consoleOutput) {
+            const line = document.createElement('div');
+            line.textContent = message;
+            consoleOutput.appendChild(line);
+            consoleOutput.scrollTop = consoleOutput.scrollHeight;
         }
-        
-        const line = document.createElement('div');
-        line.className = 'console-line';
-        
-        // Apply agent-line class for special styling
-        if (isAgentLine) {
-            line.classList.add('agent-line');
-        }
-        
-        line.textContent = sanitizedText.trim();
-        consoleOutput.appendChild(line);
-        consoleOutput.scrollTop = consoleOutput.scrollHeight;
     }
-    
-    function showError(message) {
-        const errorElement = document.getElementById('scanError');
-        errorElement.textContent = message;
-        errorElement.style.display = 'block';
+
+    function showErrorInPage(message) {
+        const scanErrorDiv = document.getElementById('scanError');
+        if (scanErrorDiv) {
+            scanErrorDiv.textContent = message;
+            scanErrorDiv.style.display = 'block';
+        }
+        console.error("Scan Page JS Error (in-page script):", message);
     }
     
     function resetScanForm() {
-        document.getElementById('scanFormContainer').style.display = 'block';
-        document.getElementById('scanResults').style.display = 'none';
+        const scanFormContainer = document.getElementById('scanFormContainer');
+        const scanResultsDiv = document.getElementById('scanResults');
+        const scanForm = document.getElementById('scanForm');
+
+        if(scanFormContainer) scanFormContainer.style.display = 'block';
+        if(scanResultsDiv) scanResultsDiv.style.display = 'none';
+        if(scanForm) scanForm.reset();
+
+        const scanErrorDiv = document.getElementById('scanError');
+        if (scanErrorDiv) scanErrorDiv.style.display = 'none';
+        const consoleOutput = document.getElementById('consoleOutput');
+        if(consoleOutput) consoleOutput.innerHTML = '';
+        const vulnerabilityResults = document.getElementById('vulnerabilityResults');
+        if(vulnerabilityResults) vulnerabilityResults.innerHTML = '';
     }
 </script>
 {% endblock %} 
