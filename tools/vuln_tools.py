@@ -110,14 +110,14 @@ def load_payloads(vulnerability_type):
 
 def xss_scanner(url, params=None):
     """
-    Quét lỗ hổng XSS trên URL và các tham số.
+    Scans for XSS vulnerabilities on a URL and its parameters.
     
     Args:
-        url (str): URL cần quét
-        params (dict, optional): Các tham số và giá trị để kiểm tra
+        url (str): The URL to scan.
+        params (dict, optional): Parameters and values to test.
         
     Returns:
-        dict: Kết quả quét XSS
+        dict: XSS scan results.
     """
     # Load XSS payloads from file with limited number
     XSS_PAYLOADS = load_payloads("xss")
@@ -128,11 +128,11 @@ def xss_scanner(url, params=None):
         "details": []
     }
     
-    # Thông báo 
-    print(f"Searching for XSS on URL: {url}")
+    # Logging scan start
+    print(f"Scanning for XSS on URL: {url}")
     
     try:
-        # Trường hợp không có tham số cụ thể, tự động tìm các tham số từ URL
+        # If no specific parameters, automatically find parameters from URL
         if params is None:
             params = {}
             parsed_url = urlparse(url)
@@ -151,10 +151,10 @@ def xss_scanner(url, params=None):
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
         
-        # Kiểm tra từng tham số
+        # Test each parameter
         for param_name, param_value in params.items():
             param_vulnerable = False
-            # Thử từng payload XSS
+            # Try each XSS payload
             for payload in XSS_PAYLOADS:
                 # Skip testing more payloads if we already found vulnerability in this parameter
                 if param_vulnerable:
@@ -166,7 +166,7 @@ def xss_scanner(url, params=None):
                 try:
                     response = requests.get(url, params=test_params, headers=headers, timeout=10)
                     
-                    # Kiểm tra xem payload có xuất hiện nguyên vẹn trong phản hồi không
+                    # Check if the payload appears intact in the response
                     if payload in response.text:
                         result["vulnerable"] = True
                         param_vulnerable = True
@@ -180,8 +180,8 @@ def xss_scanner(url, params=None):
                             "status_code": response.status_code
                         })
                         
-                        # Đã tìm thấy lỗ hổng trong tham số này, không cần thử thêm payload
-                        print(f"Found XSS vulnerability in parameter '{param_name}' with payload: {payload}")
+                        # Vulnerability found in this parameter, no need to try more payloads
+                        print(f"XSS vulnerability found in parameter '{param_name}' with payload: {payload}")
                         break
                         
                 except requests.exceptions.RequestException:
@@ -197,14 +197,14 @@ def xss_scanner(url, params=None):
 
 def sqli_scanner(url, params=None):
     """
-    Quét lỗ hổng SQL Injection trên URL và các tham số.
+    Scans for SQL Injection vulnerabilities on a URL and its parameters.
     
     Args:
-        url (str): URL cần quét
-        params (dict, optional): Các tham số và giá trị để kiểm tra
+        url (str): The URL to scan.
+        params (dict, optional): Parameters and values to test.
         
     Returns:
-        dict: Kết quả quét SQL Injection
+        dict: SQL Injection scan results.
     """
     # Load SQL Injection payloads from file with limited number
     SQLI_PAYLOADS = load_payloads("sqli")
@@ -215,11 +215,11 @@ def sqli_scanner(url, params=None):
         "details": []
     }
     
-    # Thông báo
-    print(f"Searching for SQL Injection on URL: {url}")
+    # Logging scan start
+    print(f"Scanning for SQL Injection on URL: {url}")
     
     try:
-        # Trường hợp không có tham số cụ thể, tự động tìm các tham số từ URL
+        # If no specific parameters, automatically find parameters from URL
         if params is None:
             params = {}
             parsed_url = urlparse(url)
@@ -238,7 +238,7 @@ def sqli_scanner(url, params=None):
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
         
-        # Phương tiện nhận biết lỗi SQL
+        # SQL error patterns
         sql_errors = [
             "SQL syntax",
             "MySQL",
@@ -259,10 +259,10 @@ def sqli_scanner(url, params=None):
             "Microsoft JET Database"
         ]
         
-        # Kiểm tra từng tham số
+        # Test each parameter
         for param_name, param_value in params.items():
             param_vulnerable = False
-            # Thử từng payload SQL Injection
+            # Try each SQL Injection payload
             for payload in SQLI_PAYLOADS:
                 # Skip testing more payloads if we already found vulnerability in this parameter
                 if param_vulnerable:
@@ -274,7 +274,7 @@ def sqli_scanner(url, params=None):
                 try:
                     response = requests.get(url, params=test_params, headers=headers, timeout=10)
                     
-                    # Kiểm tra xem có lỗi SQL nào trong phản hồi không
+                    # Check if there is any SQL error in the response
                     for error in sql_errors:
                         if error in response.text:
                             result["vulnerable"] = True
@@ -290,8 +290,8 @@ def sqli_scanner(url, params=None):
                                 "error": error
                             })
                             
-                            # Đã tìm thấy lỗ hổng trong tham số này, không cần thử thêm payload
-                            print(f"Found SQL Injection vulnerability in parameter '{param_name}' with payload: {payload}")
+                            # Vulnerability found in this parameter, no need to try more payloads
+                            print(f"SQL Injection vulnerability found in parameter '{param_name}' with payload: {payload}")
                             break
                     
                     # If we found SQL error, skip to next parameter

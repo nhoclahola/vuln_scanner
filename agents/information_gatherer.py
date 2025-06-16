@@ -3,21 +3,21 @@ import io
 import json
 from crewai import Agent
 
-# Không ghi đè sys.stdout/sys.stderr ở đây nữa
+# No longer overriding sys.stdout/sys.stderr here
 
 from tools.web_tools import http_header_fetcher, ssl_tls_analyzer, cms_detector, port_scanner, security_headers_analyzer
 
 def create_information_gatherer_agent(tools, llm=None, memory=False):
     """
-    Tạo một Agent chuyên thu thập thông tin cơ bản về trang web mục tiêu.
+    Creates an Agent specialized in gathering basic information about the target website.
     
     Args:
-        tools (list): Danh sách các công cụ mà agent sẽ sử dụng
-        llm (LLM, optional): Mô hình ngôn ngữ lớn để sử dụng
-        memory (bool, optional): Bật/tắt tính năng memory cho agent
+        tools (list): List of tools the agent will use.
+        llm (LLM, optional): The large language model to be used.
+        memory (bool, optional): Enable/disable memory for the agent.
         
     Returns:
-        Agent: Đối tượng Agent đã được định nghĩa
+        Agent: The defined Agent object.
     """
     return Agent(
         role='Information Gathering Specialist',
@@ -41,13 +41,13 @@ def create_information_gatherer_agent(tools, llm=None, memory=False):
 
 def gather_information(url):
     """
-    Thu thập thông tin cơ bản về website.
+    Gathers basic information about a website.
     
     Args:
-        url (str): URL của trang web cần thu thập thông tin
+        url (str): The URL of the website to gather information from.
         
     Returns:
-        dict: Thông tin về website
+        dict: Information about the website.
     """
     results = {
         "target_url": url,

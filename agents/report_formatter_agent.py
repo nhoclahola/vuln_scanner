@@ -1,7 +1,7 @@
-from crewai import Agent, LLM # LLM có thể cần nếu bạn muốn type hint rõ ràng
+from crewai import Agent, LLM # LLM can be needed if you want explicit type hints
 
-def create_json_report_formatter_agent(llm: LLM): # Thêm type hint cho llm
-    """Tạo agent để định dạng báo cáo thành JSON cho web."""
+def create_json_report_formatter_agent(llm: LLM): # Added type hint for llm
+    """Creates an agent to format the report into JSON for web display."""
     return Agent(
         role='JSON Report Formatter',
         goal='''Transform the detailed vulnerability scan report into a structured, concise JSON format suitable for web frontend display.

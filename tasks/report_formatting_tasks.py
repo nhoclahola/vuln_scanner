@@ -1,7 +1,7 @@
 from crewai import Task, Agent # Agent có thể cần nếu bạn muốn type hint rõ ràng
 
 def create_json_report_formatting_task(agent: Agent, original_report_content: str): # Thêm type hint
-    """Tạo task để định dạng báo cáo thành JSON."""
+    """Creates a task to format the report into JSON."""
     return Task(
         description=f'''Analyze the following vulnerability scan report and convert it into a structured JSON format.
 The JSON output MUST be a single, valid JSON object. Do NOT include any explanatory text before or after the JSON block.

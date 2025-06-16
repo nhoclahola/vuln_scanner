@@ -10,22 +10,22 @@ from bs4 import BeautifulSoup
 from urllib.parse import urlparse, urljoin
 from crewai.tools import tool
 
-# Không ghi đè sys.stdout/sys.stderr ở đây nữa
+# No longer overriding sys.stdout/sys.stderr here
 
 @tool("HTTP Headers Fetcher")
 def http_header_fetcher(url: str) -> str:
     """
-    Thu thập thông tin HTTP header từ một URL.
+    Fetches HTTP header information from a URL.
     
     Args:
-        url (str): URL để kiểm tra
+        url (str): The URL to inspect.
         
     Returns:
-        str: Thông tin về các HTTP header dạng JSON
+        str: Information about HTTP headers in JSON format.
     """
     
     try:
-        # Thêm schema nếu chưa có
+        # Add schema if not present
         if not url.startswith(('http://', 'https://')):
             url = 'https://' + url
             
@@ -41,7 +41,7 @@ def http_header_fetcher(url: str) -> str:
             "headers": dict(response.headers)
         }
         
-        # Phân tích các header bảo mật
+        # Analyze security headers
         security_headers = {
             "X-XSS-Protection": response.headers.get("X-XSS-Protection"),
             "X-Content-Type-Options": response.headers.get("X-Content-Type-Options"),
@@ -51,7 +51,7 @@ def http_header_fetcher(url: str) -> str:
             "Referrer-Policy": response.headers.get("Referrer-Policy")
         }
         
-        # Loại bỏ các header None
+        # Remove None headers
         security_headers = {k: v for k, v in security_headers.items() if v is not None}
         
         result["security_headers"] = security_headers
@@ -60,45 +60,45 @@ def http_header_fetcher(url: str) -> str:
         return json.dumps(result, indent=2, ensure_ascii=False)
     
     except Exception as e:
-        return json.dumps({"error": f"Lỗi khi thu thập HTTP header: {str(e)}"}, ensure_ascii=False)
+        return json.dumps({"error": f"Error fetching HTTP headers: {str(e)}"}, ensure_ascii=False)
 
 @tool("SSL/TLS Analyzer")
 def ssl_tls_analyzer(url: str) -> str:
     """
-    Phân tích cấu hình SSL/TLS của một URL.
+    Analyzes the SSL/TLS configuration of a URL.
     
     Args:
-        url (str): URL để kiểm tra
+        url (str): The URL to inspect.
         
     Returns:
-        str: Thông tin về cấu hình SSL/TLS dạng JSON
+        str: Information about the SSL/TLS configuration in JSON format.
     """
     
     try:
-        # Phân tích URL để lấy hostname
+        # Parse URL to get hostname
         parsed_url = urlparse(url)
         hostname = parsed_url.netloc
         
-        # Nếu URL không có schema và netloc, xử lý url như một hostname
+        # If URL has no schema and netloc, treat url as a hostname
         if not hostname:
             hostname = url.split('/')[0].split(':')[0]
             
-        # Mặc định là port 443 cho HTTPS
+        # Default to port 443 for HTTPS
         port = 443
         
-        # Tạo kết nối đến server
+        # Create connection to server
         context = ssl.create_default_context()
         
         with socket.create_connection((hostname, port), timeout=10) as sock:
             with context.wrap_socket(sock, server_hostname=hostname) as ssock:
-                # Lấy thông tin chứng chỉ
+                # Get certificate information
                 cert = ssock.getpeercert()
-                # Lấy thông tin phiên bản SSL/TLS
+                # Get cipher information
                 cipher = ssock.cipher()
-                # Lấy giao thức SSL/TLS
+                # Get SSL/TLS protocol
                 protocol = ssock.version()
             
-        # Chuyển đổi thông tin chứng chỉ sang định dạng dễ đọc
+        # Convert certificate information to a readable format
         cert_info = {
             "subject": dict(x[0] for x in cert['subject']),
             "issuer": dict(x[0] for x in cert['issuer']),
@@ -107,22 +107,22 @@ def ssl_tls_analyzer(url: str) -> str:
             "notAfter": cert['notAfter']
         }
         
-        # Lấy các extension quan trọng
+        # Get important extensions
         extensions = {}
         for ext in cert.get('extensions', []):
             extensions[ext[0]] = ext[1]
             
-        # Đánh giá độ mạnh của cấu hình
+        # Evaluate configuration strength
         cipher_info = {
             "name": cipher[0],
             "version": cipher[1],
             "bits": cipher[2]
         }
         
-        # Kiểm tra xem có sử dụng TLS 1.2 trở lên không
+        # Check if TLS 1.2 or higher is used
         uses_modern_tls = protocol in ['TLSv1.2', 'TLSv1.3']
         
-        # Kiểm tra ngày hết hạn
+        # Check expiration date
         not_after = cert['notAfter']
         
         result = {
@@ -140,28 +140,28 @@ def ssl_tls_analyzer(url: str) -> str:
         return json.dumps(result, indent=2, ensure_ascii=False)
     
     except ssl.SSLError as e:
-        return json.dumps({"error": f"Lỗi SSL: {str(e)}"}, ensure_ascii=False)
+        return json.dumps({"error": f"SSL Error: {str(e)}"}, ensure_ascii=False)
     except socket.timeout:
-        return json.dumps({"error": "Lỗi timeout khi kết nối đến server"}, ensure_ascii=False)
+        return json.dumps({"error": "Timeout error when connecting to server"}, ensure_ascii=False)
     except socket.gaierror:
-        return json.dumps({"error": "Lỗi khi phân giải tên miền"}, ensure_ascii=False)
+        return json.dumps({"error": "Error resolving domain name"}, ensure_ascii=False)
     except Exception as e:
-        return json.dumps({"error": f"Lỗi khi phân tích SSL/TLS: {str(e)}"}, ensure_ascii=False)
+        return json.dumps({"error": f"Error analyzing SSL/TLS: {str(e)}"}, ensure_ascii=False)
 
 @tool("CMS Detector")
 def cms_detector(url: str) -> str:
     """
-    Phát hiện hệ thống quản lý nội dung (CMS) của một website.
+    Detects the Content Management System (CMS) of a website.
     
     Args:
-        url (str): URL của website cần kiểm tra
+        url (str): The URL of the website to check.
         
     Returns:
-        str: Thông tin về CMS của website dạng JSON
+        str: Information about the website's CMS in JSON format.
     """
     
     try:
-        # Thêm schema nếu chưa có
+        # Add schema if not present
         if not url.startswith(('http://', 'https://')):
             url = 'https://' + url
             
@@ -171,7 +171,7 @@ def cms_detector(url: str) -> str:
         
         response = requests.get(url, headers=headers, timeout=10)
         
-        # Danh sách các dấu hiệu để nhận biết CMS
+        # List of signatures to identify CMS
         cms_signatures = {
             'WordPress': [
                 'wp-content', 'wp-includes', 'wordpress', 
@@ -215,14 +215,14 @@ def cms_detector(url: str) -> str:
             ]
         }
         
-        # Phân tích HTML
+        # Analyze HTML
         soup = BeautifulSoup(response.text, 'html.parser')
         html_content = response.text
         
         detected_cms = {}
         confidence_scores = {}
         
-        # Kiểm tra từng CMS
+        # Check each CMS
         for cms, signatures in cms_signatures.items():
             detected = 0
             for signature in signatures:
@@ -232,21 +232,21 @@ def cms_detector(url: str) -> str:
             if detected > 0:
                 confidence = (detected / len(signatures)) * 100
                 confidence_scores[cms] = confidence
-                if confidence >= 30:  # Ngưỡng phát hiện
+                if confidence >= 30:  # Detection threshold
                     detected_cms[cms] = confidence
         
-        # Kiểm tra meta tags cho các generator
+        # Check meta tags for generators
         meta_generator = soup.find('meta', attrs={'name': 'generator'})
         if meta_generator:
             generator_content = meta_generator.get('content', '')
             for cms in cms_signatures:
                 if cms.lower() in generator_content.lower():
                     if cms not in detected_cms:
-                        detected_cms[cms] = 90  # Độ tin cậy cao nếu tìm thấy trong meta generator
+                        detected_cms[cms] = 90  # High confidence if found in meta generator
                     else:
                         detected_cms[cms] = max(detected_cms[cms], 90)
         
-        # Kiểm tra wordpress bằng /wp-json/
+        # Check WordPress using /wp-json/
         wp_api_url = urljoin(url, '/wp-json/')
         try:
             wp_api_resp = requests.get(wp_api_url, headers=headers, timeout=5)
@@ -258,7 +258,7 @@ def cms_detector(url: str) -> str:
         except:
             pass
             
-        # Sắp xếp theo độ tin cậy
+        # Sort by confidence
         detected_cms = dict(sorted(detected_cms.items(), key=lambda x: x[1], reverse=True))
             
         result = {
@@ -274,30 +274,30 @@ def cms_detector(url: str) -> str:
         return json.dumps(result, indent=2, ensure_ascii=False)
     
     except Exception as e:
-        return json.dumps({"error": f"Lỗi khi phát hiện CMS: {str(e)}"}, ensure_ascii=False)
+        return json.dumps({"error": f"Error detecting CMS: {str(e)}"}, ensure_ascii=False)
 
 @tool("Port Scanner")
 def port_scanner(host: str, scan_type: str = "basic") -> str:
     """
-    Quét các cổng thông dụng trên một host.
+    Scans common ports on a host.
     
     Args:
-        host (str): Hostname hoặc địa chỉ IP cần quét
-        scan_type (str, optional): Loại quét - "basic" hoặc "full"
+        host (str): Hostname or IP address to scan
+        scan_type (str, optional): Scan type - "basic" or "full"
         
     Returns:
-        str: Kết quả quét cổng dạng JSON
+        str: Scan result in JSON format
     """
     
     try:
-        # Loại bỏ schema nếu có
+        # Remove schema if present
         parsed_host = urlparse(host)
         if parsed_host.netloc:
             target = parsed_host.netloc
         else:
             target = host.split('/')[0]
         
-        # Loại bỏ port từ hostname nếu có
+        # Remove port from hostname if present
         if ':' in target:
             target = target.split(':')[0]
         
@@ -309,13 +309,13 @@ def port_scanner(host: str, scan_type: str = "basic") -> str:
             "scan_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
         }
         
-        # Các cổng thông dụng để quét
+        # Common ports to scan
         if scan_type == "basic":
             ports = [21, 22, 23, 25, 53, 80, 110, 143, 443, 465, 587, 993, 995, 3306, 3389, 5432, 8080, 8443]
         else:  # full scan
-            ports = list(range(1, 1001))  # Quét 1000 cổng đầu tiên
+            ports = list(range(1, 1001))  # Scan first 1000 ports
         
-        # Thiết lập timeout ngắn để tăng tốc quét
+        # Set short timeout for faster scanning
         timeout = 0.5  # 500ms
         
         for port in ports:
@@ -323,12 +323,12 @@ def port_scanner(host: str, scan_type: str = "basic") -> str:
             sock.settimeout(timeout)
             
             try:
-                # Thử kết nối đến port
+                # Try connecting to port
                 conn_result = sock.connect_ex((target, port))
                 
-                # Nếu kết nối thành công (conn_result = 0)
+                # If connection successful (conn_result = 0)
                 if conn_result == 0:
-                    # Thử xác định dịch vụ
+                    # Try to determine service
                     service = socket.getservbyport(port, "tcp") if port < 1024 else "unknown"
                     
                     port_info = {
@@ -345,7 +345,7 @@ def port_scanner(host: str, scan_type: str = "basic") -> str:
             finally:
                 sock.close()
         
-        # Tổng hợp kết quả
+        # Summarize results
         result["total_open"] = len(result["open_ports"])
         result["total_closed"] = len(result["closed_ports"])
         result["total_scanned"] = len(ports)
@@ -353,22 +353,22 @@ def port_scanner(host: str, scan_type: str = "basic") -> str:
         return json.dumps(result, indent=2, ensure_ascii=False)
     
     except Exception as e:
-        return json.dumps({"error": f"Lỗi khi quét cổng: {str(e)}"}, ensure_ascii=False)
+        return json.dumps({"error": f"Error scanning ports: {str(e)}"}, ensure_ascii=False)
 
 @tool("Security Headers Analyzer")
 def security_headers_analyzer(url: str) -> str:
     """
-    Phân tích các HTTP security header của một website.
+    Analyzes the HTTP security headers of a website.
     
     Args:
-        url (str): URL của website cần kiểm tra
+        url (str): The URL of the website to check
         
     Returns:
-        str: Kết quả phân tích security header dạng JSON
+        str: Result of security header analysis in JSON format
     """
     
     try:
-        # Thêm schema nếu chưa có
+        # Add schema if not present
         if not url.startswith(('http://', 'https://')):
             url = 'https://' + url
             
@@ -378,46 +378,46 @@ def security_headers_analyzer(url: str) -> str:
         
         response = requests.get(url, headers=headers, timeout=10)
         
-        # Danh sách các security header cần kiểm tra
+        # List of security headers to check
         security_headers = {
             'Strict-Transport-Security': {
                 'header': response.headers.get('Strict-Transport-Security'),
-                'description': 'Bảo vệ chống lại tấn công downgrade HTTPS->HTTP',
+                'description': 'Protect against downgrade HTTPS->HTTP attacks',
                 'recommendations': 'max-age=31536000; includeSubDomains'
             },
             'Content-Security-Policy': {
                 'header': response.headers.get('Content-Security-Policy'),
-                'description': 'Bảo vệ chống lại XSS và data injection',
-                'recommendations': 'Thiết lập source whitelist nghiêm ngặt'
+                'description': 'Protect against XSS and data injection',
+                'recommendations': 'Set up strict source whitelist'
             },
             'X-Content-Type-Options': {
                 'header': response.headers.get('X-Content-Type-Options'),
-                'description': 'Bảo vệ chống lại MIME-sniffing',
+                'description': 'Protect against MIME-sniffing',
                 'recommendations': 'nosniff'
             },
             'X-Frame-Options': {
                 'header': response.headers.get('X-Frame-Options'),
-                'description': 'Bảo vệ chống lại clickjacking',
-                'recommendations': 'DENY hoặc SAMEORIGIN'
+                'description': 'Protect against clickjacking',
+                'recommendations': 'DENY or SAMEORIGIN'
             },
             'X-XSS-Protection': {
                 'header': response.headers.get('X-XSS-Protection'),
-                'description': 'Bảo vệ chống lại XSS trên trình duyệt cũ',
+                'description': 'Protect against XSS on old browsers',
                 'recommendations': '1; mode=block'
             },
             'Referrer-Policy': {
                 'header': response.headers.get('Referrer-Policy'),
-                'description': 'Kiểm soát thông tin trong HTTP Referer',
+                'description': 'Control HTTP Referer information',
                 'recommendations': 'strict-origin-when-cross-origin'
             },
             'Permissions-Policy': {
                 'header': response.headers.get('Permissions-Policy') or response.headers.get('Feature-Policy'),
-                'description': 'Kiểm soát các tính năng và API của trình duyệt',
-                'recommendations': 'Thiết lập giới hạn các tính năng cần thiết'
+                'description': 'Control browser features and APIs',
+                'recommendations': 'Set up necessary feature limits'
             }
         }
         
-        # Đánh giá từng header
+        # Evaluate each header
         result = {
             "url": url,
             "headers": {},
@@ -431,7 +431,7 @@ def security_headers_analyzer(url: str) -> str:
             if data['header']:
                 result["headers"][header] = data['header']
                 
-                # Kiểm tra giá trị hợp lý và thêm điểm
+                # Check for valid value and add points
                 if header == 'Strict-Transport-Security' and 'max-age=' in data['header']:
                     result["score"] += 2
                 elif header == 'X-Content-Type-Options' and 'nosniff' in data['header']:
@@ -441,47 +441,47 @@ def security_headers_analyzer(url: str) -> str:
                 elif header == 'X-XSS-Protection' and '1' in data['header']:
                     result["score"] += 2
                 elif header == 'Content-Security-Policy':
-                    result["score"] += 2  # Bất kỳ CSP nào cũng là tốt hơn không có
+                    result["score"] += 2  # Any CSP is better than no CSP
                 elif header == 'Referrer-Policy':
                     result["score"] += 2
                 elif header == 'Permissions-Policy' or header == 'Feature-Policy':
                     result["score"] += 2
                 else:
-                    result["score"] += 1  # Có header nhưng giá trị không tối ưu
+                    result["score"] += 1  # Header present but value not optimal
             else:
                 result["missing_headers"].append({
                     "header": header,
                     "description": data['description'],
                     "recommendation": data['recommendations']
                 })
-                result["recommendations"].append(f"Thêm {header}: {data['recommendations']}")
+                result["recommendations"].append(f"Add {header}: {data['recommendations']}")
         
-        # Tính điểm phần trăm
+        # Calculate percentage score
         result["score_percent"] = round((result["score"] / result["max_score"]) * 100, 2)
         
-        # Đánh giá tổng thể
+        # Overall evaluation
         if result["score_percent"] >= 80:
-            result["rating"] = "Tốt"
+            result["rating"] = "Good"
         elif result["score_percent"] >= 50:
-            result["rating"] = "Trung bình"
+            result["rating"] = "Average"
         else:
-            result["rating"] = "Kém"
+            result["rating"] = "Poor"
             
         return json.dumps(result, indent=2, ensure_ascii=False)
     
     except Exception as e:
-        return json.dumps({"error": f"Lỗi khi phân tích security headers: {str(e)}"}, ensure_ascii=False)
+        return json.dumps({"error": f"Error analyzing security headers: {str(e)}"}, ensure_ascii=False)
 
 @tool("Request URL")
 def request_url(url: str) -> str:
     """
-    Gửi request đến URL và trả về nội dung.
+    Sends a request to a URL and returns the content.
     
     Args:
-        url (str): URL cần request
+        url (str): The URL to request
         
     Returns:
-        str: Nội dung của URL
+        str: Content of the URL
     """
     try:
         headers = {
@@ -493,11 +493,11 @@ def request_url(url: str) -> str:
         
         content_type = response.headers.get('Content-Type', '')
         
-        # Chỉ xử lý nội dung văn bản
+        # Process only text content
         if 'text' in content_type or 'json' in content_type or 'xml' in content_type or 'html' in content_type:
             return response.text
         else:
-            return f"Không hỗ trợ nội dung kiểu: {content_type}"
+            return f"Unsupported content type: {content_type}"
     
     except requests.exceptions.RequestException as e:
-        return f"Lỗi khi request URL: {str(e)}" 
+        return f"Error requesting URL: {str(e)}" 

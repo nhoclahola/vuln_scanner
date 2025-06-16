@@ -2,19 +2,19 @@ import sys
 import io
 from crewai import Agent
 
-# Không ghi đè sys.stdout/sys.stderr ở đây nữa
+# No longer overriding sys.stdout/sys.stderr here
 
 def create_crawler_agent(tools, llm=None, memory=False):
     """
-    Tạo một Agent chuyên dùng để dò tìm và quét endpoint trên website.
+    Creates an Agent specialized in discovering and scanning endpoints on a website.
     
     Args:
-        tools (list): Danh sách các công cụ mà agent sẽ sử dụng
-        llm (LLM, optional): Mô hình ngôn ngữ lớn để sử dụng
-        memory (bool, optional): Bật/tắt tính năng memory cho agent
+        tools (list): List of tools the agent will use.
+        llm (LLM, optional): The large language model to be used.
+        memory (bool, optional): Enable/disable memory for the agent.
         
     Returns:
-        Agent: Đối tượng Agent đã được định nghĩa
+        Agent: The defined Agent object.
     """
     return Agent(
         role='Web Crawler Specialist',

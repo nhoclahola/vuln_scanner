@@ -2,19 +2,19 @@ import sys
 import io
 from crewai import Agent
 
-# Không ghi đè sys.stdout/sys.stderr ở đây nữa
+# No longer overriding sys.stdout/sys.stderr here
 
 def create_security_analyst_agent(tools, llm=None, memory=False):
     """
-    Tạo một Agent chuyên phân tích bảo mật và đánh giá các lỗ hổng.
+    Creates an Agent specialized in security analysis and vulnerability assessment.
     
     Args:
-        tools (list): Danh sách các công cụ mà agent sẽ sử dụng
-        llm (LLM, optional): Mô hình ngôn ngữ lớn để sử dụng
-        memory (bool, optional): Bật/tắt tính năng memory cho agent
+        tools (list): List of tools the agent will use.
+        llm (LLM, optional): The large language model to be used.
+        memory (bool, optional): Enable/disable memory for the agent.
         
     Returns:
-        Agent: Đối tượng Agent đã được định nghĩa
+        Agent: The defined Agent object.
     """
     return Agent(
         role='Security Analyst',
@@ -43,20 +43,20 @@ def create_security_analyst_agent(tools, llm=None, memory=False):
 
 def analyze_vulnerabilities(scan_results, target_url, additional_context=None):
     """
-    Phân tích kết quả quét lỗ hổng và đưa ra đánh giá chi tiết
+    Analyzes vulnerability scan results and provides a detailed assessment.
     
     Args:
-        scan_results (dict): Kết quả quét lỗ hổng
-        target_url (str): URL đã quét
-        additional_context (dict, optional): Thông tin bổ sung
+        scan_results (dict): Vulnerability scan results.
+        target_url (str): The scanned URL.
+        additional_context (dict, optional): Additional context.
         
     Returns:
-        dict: Báo cáo phân tích an ninh
+        dict: Security analysis report.
     """
-    # Mẫu phân tích - trong triển khai thực tế sẽ được thực hiện bởi agent
+    # Analysis example - in a real implementation, this would be done by the agent
     vulnerabilities = []
     
-    # Xử lý mỗi loại lỗ hổng
+    # Process each vulnerability type
     if 'xss_results' in scan_results:
         for xss_finding in scan_results['xss_results']:
             vulnerabilities.append({
@@ -97,17 +97,17 @@ def analyze_vulnerabilities(scan_results, target_url, additional_context=None):
 
 def enrich_vulnerability_data(vulnerability_type, vulnerability_details):
     """
-    Làm giàu dữ liệu lỗ hổng với thông tin bổ sung như CVE, điểm CVSS, v.v.
+    Enriches vulnerability data with additional information like CVE, CVSS score, etc.
     
     Args:
-        vulnerability_type (str): Loại lỗ hổng (XSS, SQLI, etc.)
-        vulnerability_details (str): Chi tiết về lỗ hổng
+        vulnerability_type (str): Type of vulnerability (XSS, SQLI, etc.).
+        vulnerability_details (str): Details about the vulnerability.
         
     Returns:
-        dict: Thông tin lỗ hổng đã được làm giàu
+        dict: Enriched vulnerability information.
     """
-    # Trong triển khai thực tế, hàm này sẽ gọi các công cụ để tìm kiếm CVE liên quan
-    # và phân tích mức độ nghiêm trọng
+    # In a real implementation, this function would call tools to search for related CVEs
+    # and analyze severity.
     
     enriched_data = {
         "type": vulnerability_type,
@@ -143,20 +143,20 @@ def enrich_vulnerability_data(vulnerability_type, vulnerability_details):
 
 def generate_security_report(scan_results, target_url, detailed=False):
     """
-    Tạo báo cáo an ninh tổng thể từ kết quả quét
+    Generates an overall security report from scan results.
     
     Args:
-        scan_results (dict): Kết quả quét lỗ hổng
-        target_url (str): URL đã quét
-        detailed (bool): Tạo báo cáo chi tiết hay không
+        scan_results (dict): Vulnerability scan results.
+        target_url (str): The scanned URL.
+        detailed (bool): Whether to generate a detailed report.
         
     Returns:
-        dict: Báo cáo an ninh
+        dict: Security report.
     """
-    # Phân tích kết quả
+    # Analyze results
     analysis = analyze_vulnerabilities(scan_results, target_url)
     
-    # Tạo báo cáo cơ bản
+    # Create basic report
     report = {
         "target_url": target_url,
         "scan_date": scan_results.get("scan_date", "Unknown"),
